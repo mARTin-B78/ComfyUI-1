@@ -123,6 +123,30 @@ class TestGetExpectedOutputsForNode:
         expected = get_expected_outputs_for_node(dynprompt, "1")
         assert expected == frozenset({0})
 
+    def test_ephemeral_node_invalidates_cache(self):
+        """Test that adding ephemeral nodes updates expected outputs."""
+        prompt = {
+            "1": {"class_type": "SourceNode", "inputs": {}},
+            "2": {"class_type": "ConsumerNode", "inputs": {"image": ["1", 0]}},
+        }
+        dynprompt = DynamicPrompt(prompt)
+
+        # Initially only output 0 is connected
+        expected = get_expected_outputs_for_node(dynprompt, "1")
+        assert expected == frozenset({0})
+
+        # Add an ephemeral node that connects to output 1
+        dynprompt.add_ephemeral_node(
+            "eph_1",
+            {"class_type": "EphemeralNode", "inputs": {"data": ["1", 1]}},
+            parent_id="2",
+            display_id="2",
+        )
+
+        # Now both outputs 0 and 1 should be expected
+        expected = get_expected_outputs_for_node(dynprompt, "1")
+        assert expected == frozenset({0, 1})
+
 
 class TestExecutionContext:
     """Tests for ExecutionContext with expected_outputs field."""
