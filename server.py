@@ -753,8 +753,8 @@ class PromptServer():
                 out[node_class] = node_info(node_class)
             return web.json_response(out)
 
-        @routes.get("/custom_node_startup_errors")
-        async def get_custom_node_startup_errors(request):
+        @routes.get("/node_startup_errors")
+        async def get_node_startup_errors(request):
             # Group errors by source ("custom_node" / "comfy_extra" / "api_node")
             # so the frontend/Manager can render them in distinct sections.
             # `module_path` is stripped because the absolute on-disk path is
