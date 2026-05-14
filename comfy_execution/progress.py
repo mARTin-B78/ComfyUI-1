@@ -164,6 +164,8 @@ class WebUIProgressHandler(ProgressHandler):
         if self.server_instance is None:
             return
 
+        workflow_id = self.registry.workflow_id if self.registry else None
+
         # Only send info for non-pending nodes
         active_nodes = {
             node_id: {
@@ -172,6 +174,7 @@ class WebUIProgressHandler(ProgressHandler):
                 "state": state["state"].value,
                 "node_id": node_id,
                 "prompt_id": prompt_id,
+                "workflow_id": workflow_id,
                 "display_node_id": self.registry.dynprompt.get_display_node_id(node_id),
                 "parent_node_id": self.registry.dynprompt.get_parent_node_id(node_id),
                 "real_node_id": self.registry.dynprompt.get_real_node_id(node_id),
@@ -183,7 +186,7 @@ class WebUIProgressHandler(ProgressHandler):
         # Send a combined progress_state message with all node states
         # Include client_id to ensure message is only sent to the initiating client
         self.server_instance.send_sync(
-            "progress_state", {"prompt_id": prompt_id, "nodes": active_nodes}, self.server_instance.client_id
+            "progress_state", {"prompt_id": prompt_id, "workflow_id": workflow_id, "nodes": active_nodes}, self.server_instance.client_id
         )
 
     @override
@@ -215,6 +218,7 @@ class WebUIProgressHandler(ProgressHandler):
                 metadata = {
                     "node_id": node_id,
                     "prompt_id": prompt_id,
+                    "workflow_id": self.registry.workflow_id if self.registry else None,
                     "display_node_id": self.registry.dynprompt.get_display_node_id(
                         node_id
                     ),
@@ -240,9 +244,10 @@ class ProgressRegistry:
     Registry that maintains node progress state and notifies registered handlers.
     """
 
-    def __init__(self, prompt_id: str, dynprompt: "DynamicPrompt"):
+    def __init__(self, prompt_id: str, dynprompt: "DynamicPrompt", workflow_id: Optional[str] = None):
         self.prompt_id = prompt_id
         self.dynprompt = dynprompt
+        self.workflow_id = workflow_id
         self.nodes: Dict[str, NodeProgressState] = {}
         self.handlers: Dict[str, ProgressHandler] = {}
 
@@ -322,7 +327,7 @@ class ProgressRegistry:
 # Global registry instance
 global_progress_registry: ProgressRegistry | None = None
 
-def reset_progress_state(prompt_id: str, dynprompt: "DynamicPrompt") -> None:
+def reset_progress_state(prompt_id: str, dynprompt: "DynamicPrompt", workflow_id: Optional[str] = None) -> None:
     global global_progress_registry
 
     # Reset existing handlers if registry exists
@@ -330,7 +335,7 @@ def reset_progress_state(prompt_id: str, dynprompt: "DynamicPrompt") -> None:
         global_progress_registry.reset_handlers()
 
     # Create new registry
-    global_progress_registry = ProgressRegistry(prompt_id, dynprompt)
+    global_progress_registry = ProgressRegistry(prompt_id, dynprompt, workflow_id)
 
 
 def add_progress_handler(handler: ProgressHandler) -> None:
