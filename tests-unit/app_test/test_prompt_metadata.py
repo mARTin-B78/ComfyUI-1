@@ -348,3 +348,65 @@ class TestPromptMetadataStore:
             "prompt_id": "p1",
             "workflow_id": "wf-1",
         })
+
+    def test_concurrent_access_does_not_corrupt_or_raise(self):
+        """Smoke test for the store's lock. ``register`` is called from
+        the aiohttp event-loop thread, ``unregister`` from the worker
+        thread, and ``inject`` fires on every ``send_sync`` from
+        whichever thread emits the event. Run all three concurrently
+        and assert no exception escapes and the store stays internally
+        consistent (the FIFO cap is never exceeded)."""
+        import threading
+
+        store = PromptMetadataStore(capacity=64)
+        stop = threading.Event()
+        errors: list[BaseException] = []
+
+        def registrar():
+            i = 0
+            try:
+                while not stop.is_set():
+                    store.register(
+                        f"p{i % 100}",
+                        {"metadata": {"workflow_id": f"wf-{i}"}},
+                    )
+                    i += 1
+            except BaseException as e:
+                errors.append(e)
+
+        def canceller():
+            i = 0
+            try:
+                while not stop.is_set():
+                    store.unregister(f"p{i % 100}")
+                    i += 1
+            except BaseException as e:
+                errors.append(e)
+
+        def injector():
+            i = 0
+            try:
+                while not stop.is_set():
+                    store.inject({"prompt_id": f"p{i % 100}", "node": "5"})
+                    i += 1
+            except BaseException as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=registrar),
+            threading.Thread(target=registrar),
+            threading.Thread(target=canceller),
+            threading.Thread(target=injector),
+            threading.Thread(target=injector),
+        ]
+        for t in threads:
+            t.start()
+        # Brief burst — long enough to interleave many ops, short enough
+        # not to slow CI.
+        threading.Event().wait(0.1)
+        stop.set()
+        for t in threads:
+            t.join(timeout=2.0)
+
+        assert errors == [], f"concurrent access raised: {errors[:3]}"
+        assert len(store) <= 64, "FIFO cap was breached under contention"

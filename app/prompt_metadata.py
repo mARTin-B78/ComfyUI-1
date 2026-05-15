@@ -15,6 +15,7 @@ instance and the helpers can be unit-tested without the rest of the app.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable, Optional
 
 
@@ -177,28 +178,49 @@ class PromptMetadataStore:
     prompt finishes, wiped on queue cancel/delete. The FIFO cap is a
     backstop: if any cleanup hook is ever skipped, the store sheds the
     oldest entry instead of growing without bound.
+
+    Access is serialized through a ``threading.Lock``. ``register`` runs
+    on the aiohttp event-loop thread, ``unregister`` runs on the
+    ``prompt_worker`` thread, and ``inject`` runs on whichever thread
+    fires ``send_sync`` (event loop, worker, asset seeder). Individual
+    ``dict`` ops are GIL-atomic, but ``register``'s
+    ``len() -> pop -> __setitem__`` and ``inject``'s ``get -> {**a, **b}``
+    are multi-step compounds whose interleaving without a lock is
+    racy. The lock is uncontended in steady state (sub-microsecond
+    critical sections) so the cost is negligible.
     """
 
     def __init__(self, capacity: int = DEFAULT_STORE_CAPACITY):
         self._envelopes: dict[str, dict] = {}
         self._capacity = capacity
+        self._lock = threading.Lock()
 
     def register(self, prompt_id: str, extra_data: Any) -> None:
         envelope = extract_envelope_from_extra_data(extra_data)
         if envelope is None:
             return
-        if len(self._envelopes) >= self._capacity:
-            self._envelopes.pop(next(iter(self._envelopes)))
-        self._envelopes[prompt_id] = envelope
+        with self._lock:
+            if len(self._envelopes) >= self._capacity:
+                self._envelopes.pop(next(iter(self._envelopes)))
+            self._envelopes[prompt_id] = envelope
 
     def unregister(self, prompt_id: str) -> None:
-        self._envelopes.pop(prompt_id, None)
+        with self._lock:
+            self._envelopes.pop(prompt_id, None)
 
     def inject(self, data: Any) -> Any:
-        return inject_envelope(data, self._envelopes.get)
+        # Snapshot the envelope under the lock so the spread in
+        # ``inject_envelope`` runs against a consistent view even if a
+        # concurrent ``register``/``unregister`` is mutating the map.
+        def locked_lookup(prompt_id: str) -> Optional[dict]:
+            with self._lock:
+                return self._envelopes.get(prompt_id)
+        return inject_envelope(data, locked_lookup)
 
     def __len__(self) -> int:
-        return len(self._envelopes)
+        with self._lock:
+            return len(self._envelopes)
 
     def __contains__(self, prompt_id: str) -> bool:
-        return prompt_id in self._envelopes
+        with self._lock:
+            return prompt_id in self._envelopes
