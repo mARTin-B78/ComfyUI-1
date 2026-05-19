@@ -14,6 +14,8 @@ from typing_extensions import override
 import folder_paths
 from comfy.cli_args import args
 from comfy_api.latest import ComfyExtension, IO, Types
+from app.preview3d_bridge import load_image_and_mask
+from server import PromptServer
 
 
 def pack_variable_mesh_batch(vertices, faces, colors=None, uvs=None, texture=None):
@@ -329,12 +331,17 @@ class SaveGLB(IO.ComfyNode):
                     tooltip="Mesh or 3D file to save",
                 ),
                 IO.String.Input("filename_prefix", default="3d/ComfyUI"),
+                IO.Load3DCamera.Input("camera_info", optional=True, advanced=True),
             ],
-            hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo]
+            outputs=[
+                IO.Image.Output(display_name="image"),
+                IO.Mask.Output(display_name="mask"),
+            ],
+            hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo, IO.Hidden.unique_id]
         )
 
     @classmethod
-    def execute(cls, mesh: Types.MESH | Types.File3D, filename_prefix: str) -> IO.NodeOutput:
+    async def execute(cls, mesh: Types.MESH | Types.File3D, filename_prefix: str, camera_info=None) -> IO.NodeOutput:
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory())
         results = []
 
@@ -383,7 +390,24 @@ class SaveGLB(IO.ComfyNode):
                     "type": "output"
                 })
                 counter += 1
-        return IO.NodeOutput(ui={"3d": results})
+
+        if not results:
+            raise ValueError("SaveGLB: no mesh was written; cannot render image output")
+
+        first = results[0]
+        rel_path = (first["subfolder"] + "/" + first["filename"]) if first["subfolder"] else first["filename"]
+        rendered = await PromptServer.instance.preview3d_bridge.request_render(
+            node_id=cls.hidden.unique_id,
+            file_path=rel_path,
+            file_type="output",
+            camera_info=camera_info,
+        )
+        image_tensor, mask_tensor = load_image_and_mask(rendered["image"], rendered["mask"])
+
+        ui_out: dict = {"3d": results}
+        if camera_info is not None:
+            ui_out["camera_info"] = [camera_info]
+        return IO.NodeOutput(image_tensor, mask_tensor, ui=ui_out)
 
 
 class Save3DExtension(ComfyExtension):

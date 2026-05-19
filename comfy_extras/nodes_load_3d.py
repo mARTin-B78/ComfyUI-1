@@ -6,6 +6,9 @@ import uuid
 from typing_extensions import override
 from comfy_api.latest import IO, UI, ComfyExtension, InputImpl, Types
 
+from app.preview3d_bridge import load_image_and_mask
+from server import PromptServer
+
 from pathlib import Path
 
 
@@ -101,11 +104,15 @@ class Preview3D(IO.ComfyNode):
                 IO.Load3DCamera.Input("camera_info", optional=True, advanced=True),
                 IO.Image.Input("bg_image", optional=True, advanced=True),
             ],
-            outputs=[],
+            outputs=[
+                IO.Image.Output(display_name="image"),
+                IO.Mask.Output(display_name="mask"),
+            ],
+            hidden=[IO.Hidden.unique_id],
         )
 
     @classmethod
-    def execute(cls, model_file: str | Types.File3D, **kwargs) -> IO.NodeOutput:
+    async def execute(cls, model_file: str | Types.File3D, **kwargs) -> IO.NodeOutput:
         if isinstance(model_file, Types.File3D):
             filename = f"preview3d_{uuid.uuid4().hex}.{model_file.format}"
             model_file.save_to(os.path.join(folder_paths.get_output_directory(), filename))
@@ -113,7 +120,20 @@ class Preview3D(IO.ComfyNode):
             filename = model_file
         camera_info = kwargs.get("camera_info", None)
         bg_image = kwargs.get("bg_image", None)
-        return IO.NodeOutput(ui=UI.PreviewUI3D(filename, camera_info, bg_image=bg_image))
+
+        rendered = await PromptServer.instance.preview3d_bridge.request_render(
+            node_id=cls.hidden.unique_id,
+            file_path=filename,
+            file_type="output",
+            camera_info=camera_info,
+        )
+        image_tensor, mask_tensor = load_image_and_mask(rendered["image"], rendered["mask"])
+
+        return IO.NodeOutput(
+            image_tensor,
+            mask_tensor,
+            ui=UI.PreviewUI3D(filename, camera_info, bg_image=bg_image),
+        )
 
     process = execute  # TODO: remove
 
