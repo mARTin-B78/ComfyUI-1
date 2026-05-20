@@ -23,7 +23,12 @@ def _make_register_result(ref_id="ref-id-2"):
     return result
 
 
-def _call(output_ui, *, enable_assets=True, file_exists=True, db_ref=None, register_result=None, directory="/output"):
+# Platform-appropriate absolute base. tempfile.gettempdir() returns C:\... on
+# Windows and /tmp on POSIX, so containment via commonpath behaves naturally.
+_DEFAULT_BASE = os.path.join(__import__("tempfile").gettempdir(), "asset-enrichment-test-base")
+
+
+def _call(output_ui, *, enable_assets=True, file_exists=True, db_ref=None, register_result=None, directory=_DEFAULT_BASE):
     fake_session_cm = MagicMock()
     fake_session_cm.__enter__ = MagicMock(return_value=MagicMock())
     fake_session_cm.__exit__ = MagicMock(return_value=False)
@@ -41,10 +46,10 @@ def _call(output_ui, *, enable_assets=True, file_exists=True, db_ref=None, regis
         "app.database.db": MagicMock(create_session=MagicMock(return_value=fake_session_cm)),
     }
 
+    # Only os.path.isfile is patched — abspath/join must run natively so the
+    # containment check sees real platform paths.
     with patch.dict("sys.modules", mocked_modules), \
-         patch("os.path.abspath", side_effect=lambda p: p), \
-         patch("os.path.isfile", return_value=file_exists), \
-         patch("os.path.join", side_effect=os.path.join):
+         patch("os.path.isfile", return_value=file_exists):
         import importlib
         import comfy_execution.asset_enrichment as mod
         importlib.reload(mod)
@@ -126,7 +131,7 @@ class TestEnrichOutputWithAssets(unittest.TestCase):
 
         mocked_modules = {
             "comfy.cli_args": MagicMock(args=_make_args(True)),
-            "folder_paths": MagicMock(get_directory_by_type=MagicMock(return_value="/output")),
+            "folder_paths": MagicMock(get_directory_by_type=MagicMock(return_value=_DEFAULT_BASE)),
             "app.assets.services.ingest": MagicMock(
                 register_file_in_place=register_side_effect,
                 DependencyMissingError=type("DependencyMissingError", (Exception,), {}),
@@ -145,9 +150,7 @@ class TestEnrichOutputWithAssets(unittest.TestCase):
         }
 
         with patch.dict("sys.modules", mocked_modules), \
-             patch("os.path.abspath", side_effect=lambda p: p), \
-             patch("os.path.isfile", return_value=True), \
-             patch("os.path.join", side_effect=os.path.join):
+             patch("os.path.isfile", return_value=True):
             import importlib
             import comfy_execution.asset_enrichment as mod
             importlib.reload(mod)
@@ -180,7 +183,7 @@ class TestEnrichOutputWithAssets(unittest.TestCase):
         register_mock = MagicMock(return_value=_make_register_result())
         mocked_modules = {
             "comfy.cli_args": MagicMock(args=_make_args(True)),
-            "folder_paths": MagicMock(get_directory_by_type=MagicMock(return_value="/output")),
+            "folder_paths": MagicMock(get_directory_by_type=MagicMock(return_value=_DEFAULT_BASE)),
             "app.assets.services.ingest": MagicMock(
                 register_file_in_place=register_mock,
                 DependencyMissingError=type("DependencyMissingError", (Exception,), {}),
@@ -212,7 +215,7 @@ class TestEnrichOutputWithAssets(unittest.TestCase):
         register_mock = MagicMock(return_value=_make_register_result())
         mocked_modules = {
             "comfy.cli_args": MagicMock(args=_make_args(True)),
-            "folder_paths": MagicMock(get_directory_by_type=MagicMock(return_value="/output")),
+            "folder_paths": MagicMock(get_directory_by_type=MagicMock(return_value=_DEFAULT_BASE)),
             "app.assets.services.ingest": MagicMock(
                 register_file_in_place=register_mock,
                 DependencyMissingError=type("DependencyMissingError", (Exception,), {}),
@@ -224,7 +227,8 @@ class TestEnrichOutputWithAssets(unittest.TestCase):
         }
 
         # Absolute filename — os.path.join discards earlier components when a later one is absolute.
-        output = {"images": [{"filename": "/etc/passwd", "subfolder": "", "type": "output"}]}
+        absolute_filename = os.path.abspath(os.sep + "etc" + os.sep + "passwd")
+        output = {"images": [{"filename": absolute_filename, "subfolder": "", "type": "output"}]}
 
         with patch.dict("sys.modules", mocked_modules), \
              patch("os.path.isfile", return_value=True):
