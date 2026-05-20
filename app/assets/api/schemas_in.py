@@ -54,7 +54,7 @@ class ListAssetsQuery(BaseModel):
     include_tags: list[str] = Field(default_factory=list)
     exclude_tags: list[str] = Field(default_factory=list)
     name_contains: str | None = None
-    job_ids: list[str] = Field(default_factory=list)
+    job_ids: list[str] = Field(default_factory=list, max_length=500)
 
     # Accept either a JSON string (query param) or a dict
     metadata_filter: dict[str, Any] | None = None
@@ -110,7 +110,7 @@ class ListAssetsQuery(BaseModel):
         for s in raw:
             try:
                 canonical = str(uuid.UUID(s))
-            except (ValueError, AttributeError) as e:
+            except ValueError as e:
                 raise ValueError(f"job_ids must be UUIDs: {s!r}") from e
             if canonical not in seen:
                 seen.add(canonical)
