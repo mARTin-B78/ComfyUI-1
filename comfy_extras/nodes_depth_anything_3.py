@@ -30,14 +30,14 @@ DA3PointCloud = io.Custom("DA3_POINT_CLOUD")
 
 # DA3_GEOMETRY is a dict with these optional keys (absent when the upstream model didn't produce them):
 #
-# Per-frame tensors — B = batch size in mono mode; B = S (number of views) in multi-view mode.
+# Per-frame tensors - B = batch size in mono mode; B = S (number of views) in multi-view mode.
 #   "depth":       torch.Tensor (B, H, W)         -- raw model depth (always present; matches MoGe convention)
 #   "image":       torch.Tensor (B, H, W, 3)      -- source image in [0, 1], CPU (always present)
 #   "mode":        str                            -- "mono" or "multiview" (always present)
 #   "sky":         torch.Tensor (B, H, W)         -- sky probability in [0, 1] (Mono/Metric variants only)
 #   "confidence":  torch.Tensor (B, H, W)         -- raw model confidence output (Small/Base variants only)
 #
-# Multi-view only — S = number of views; the leading 1 is the scene dimension from the model.
+# Multi-view only - S = number of views; the leading 1 is the scene dimension from the model.
 #   "extrinsics":  torch.Tensor (1, S, 3, 4)      -- world-to-camera [R|t] matrices
 #   "intrinsics":  torch.Tensor (1, S, 3, 3)      -- pixel-space intrinsics
 #
@@ -69,7 +69,7 @@ def _da3_default_K(H: int, W: int) -> torch.Tensor:
 def _da3_get_K(geometry: dict, b: int, H: int, W: int) -> torch.Tensor:
     """Return pixel-space K for batch element b, falling back to a default estimate."""
     if "intrinsics" in geometry:
-        # shape (1, S, 3, 3) — leading scene dimension from the multiview head
+        # shape (1, S, 3, 3) - leading scene dimension from the multiview head
         return geometry["intrinsics"][0, b].float()
     logging.getLogger("comfy").warning(
         "DA3_GEOMETRY has no intrinsics (mono-mode model). "
@@ -249,7 +249,7 @@ class DA3Inference(io.ComfyNode):
                                tooltip="- upper_bound_resize: scale so the longest side = process_res (caps memory, default).\n"
                                        "- lower_bound_resize: scale so the shortest side = process_res (preserves more detail on tall/wide images, uses more memory)."),
                 io.DynamicCombo.Input("mode",
-                                      tooltip="- mono: single view image — works with any model variant.\n"
+                                      tooltip="- mono: single view image - works with any model variant.\n"
                                               "- multiview: all images processed together for geometric consistency + camera pose, for Small/Base models only.",
                                       options=[
                     io.DynamicCombo.Option("mono", []),
@@ -259,7 +259,7 @@ class DA3Inference(io.ComfyNode):
                                                 "first", "middle"],
                                        default="saddle_balanced",
                                                tooltip="Which view acts as the geometric anchor (only when S >= 3 and no extrinsics provided).\n"
-                                               "- saddle_balanced: the view most 'average' across all others — best general choice.\n"
+                                               "- saddle_balanced: the view most 'average' across all others - best general choice.\n"
                                                "- saddle_sim_range: the view most visually distinct from the others.\n"
                                                "- first / middle: fixed positional picks."),
                         io.Combo.Input("pose_method",
@@ -406,7 +406,7 @@ class DA3Render(io.ComfyNode):
                     default="v2_style",
                     tooltip="- v2_style: mean/std normalisation for perceptually balanced results (default).\n"
                             "- min_max: stretches the full depth range to [0, 1] for maximum contrast.\n"
-                            "- raw: no scaling — preserves metric units for Metric model."),
+                            "- raw: no scaling - preserves metric units for Metric model."),
         io.Boolean.Input("apply_sky_clip", default=False,
                         tooltip="Clip sky-region depth to the 99th percentile of foreground depth before "
                                 "normalisation. Requires a 'sky' tensor in the da3_geometry input"
@@ -563,7 +563,7 @@ class DA3GeometryToMesh(io.ComfyNode):
         if n_bad:
             logging.getLogger("comfy").warning(
                 f"DA3GeometryToMesh: depth[{batch_index}] has {n_bad} non-finite pixels "
-                f"({100*n_bad/(H*W):.1f}%) — zeroed before unproject."
+                f"({100*n_bad/(H*W):.1f}%) - zeroed before unproject."
             )
         depth[~torch.isfinite(depth)] = 0.0
         logging.getLogger("comfy").debug(
