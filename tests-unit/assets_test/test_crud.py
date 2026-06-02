@@ -45,7 +45,7 @@ def test_get_and_delete_asset(http: requests.Session, api_base: str, seeded_asse
     assert "user_metadata" in detail
     assert "filename" in detail["user_metadata"]
 
-    # DELETE (soft delete; the reference is hidden, content is preserved)
+    # Soft delete — the reference is hidden, content is preserved
     rd = http.delete(f"{api_base}/api/assets/{aid}", timeout=120)
     assert rd.status_code == 204
 
@@ -60,7 +60,7 @@ def test_soft_delete_hides_from_get(http: requests.Session, api_base: str, seede
     aid = seeded_asset["id"]
     asset_hash = seeded_asset["asset_hash"]
 
-    # Soft-delete (delete is always a soft delete)
+    # Soft delete — the reference is hidden, content is preserved
     rd = http.delete(f"{api_base}/api/assets/{aid}", timeout=120)
     assert rd.status_code == 204
 
@@ -81,10 +81,10 @@ def test_soft_delete_hides_from_get(http: requests.Session, api_base: str, seede
     ids = [a["id"] for a in rl.json().get("assets", [])]
     assert aid not in ids
 
-    # The reference is already soft-deleted; content is preserved by design.
+    # The reference is already soft-deleted; content is preserved.
 
 
-def test_delete_upon_reference_count(
+def test_soft_delete_preserves_asset_identity_across_references(
     http: requests.Session, api_base: str, seeded_asset: dict
 ):
     # Create a second reference to the same asset via from-hash
@@ -118,11 +118,13 @@ def test_delete_upon_reference_count(
     rh2 = http.head(f"{api_base}/api/assets/hash/{src_hash}", timeout=120)
     assert rh2.status_code == 200  # asset identity preserved (soft delete)
 
-    # Re-associate via from-hash (reuses the preserved content), then
-    # soft-delete -> content is still preserved (delete is always soft).
+    # Re-associate via from-hash: it must reuse the same preserved content
+    # (created_new False AND the same hash), proving the soft deletes did not
+    # destroy the underlying asset. Then soft-delete again -> still preserved.
     r3 = http.post(f"{api_base}/api/assets/from-hash", json=payload, timeout=120)
     assert r3.status_code == 201, r3.json()
-    assert r3.json()["created_new"] is False  # content survived the soft deletes
+    assert r3.json()["created_new"] is False
+    assert r3.json()["asset_hash"] == src_hash  # reused the surviving content
     aid3 = r3.json()["id"]
 
     rd3 = http.delete(f"{api_base}/api/assets/{aid3}", timeout=120)
