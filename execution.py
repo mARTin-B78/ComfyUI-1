@@ -926,7 +926,14 @@ async def validate_inputs(prompt_id, prompt, item, validated, visiting=None, typ
             # frontend-injected type metadata get the same answer as the UI.
             received_type = type_resolver.resolve_output_type(o_id, val[1])
             received_types[x] = received_type
-            if 'input_types' not in validate_function_inputs and not validate_node_input(received_type, input_type):
+            # DynamicSlot publishes its accepted connection types via the
+            # `slotType` field (auto-derived union of option `when` types).
+            # The declared input_type ("COMFY_DYNAMICSLOT_V3") is just the
+            # dispatch tag; validate against slotType instead.
+            effective_input_type = input_type
+            if input_type == _io.DynamicSlot.io_type and isinstance(extra_info, dict):
+                effective_input_type = extra_info.get("slotType", input_type)
+            if 'input_types' not in validate_function_inputs and not validate_node_input(received_type, effective_input_type):
                 details = f"{x}, received_type({received_type}) mismatch input_type({input_type})"
                 error = {
                     "type": "return_type_mismatch",

@@ -7,6 +7,13 @@ or unresolvable wildcards.
 
 Works against either a raw prompt dict or a ``DynamicPrompt``. All resolved
 values are strings, so resolver state is cross-process serializable.
+
+Known limitation: when an upstream node declares its output as ``AnyType``
+(``"*"``) — Reroute, generic If/Else, many V1 utility nodes — the resolver
+returns ``"*"``. It has no way to introspect the runtime value to recover a
+more specific type. Downstream consumers (e.g. :py:class:`DynamicSlot`) will
+treat such links as AnyType and select their ``AnyType`` branch (or none),
+not a concrete-type branch.
 """
 
 from __future__ import annotations
@@ -328,10 +335,8 @@ class TypeResolver:
             except Exception:
                 return ANY_TYPE
         if isinstance(inp, io.DynamicSlot.Input):
-            try:
-                return inp.slot.get_io_type()
-            except Exception:
-                return ANY_TYPE
+            # Auto-derived slot type — comma-joined union of all option `when` types.
+            return getattr(inp, "_slot_io_type", ANY_TYPE)
         # DynamicCombo's "type" is a key selector, not a connection type.
         if isinstance(inp, io.DynamicCombo.Input):
             return ANY_TYPE

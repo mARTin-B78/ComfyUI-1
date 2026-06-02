@@ -358,6 +358,35 @@ def test_effective_slot_type_on_v3_plain_input(fake_nodes_module, TypeResolver):
     assert r.compute_live_input_types("n") == {"flag": "BOOLEAN"}
 
 
+def test_effective_slot_type_peels_dynamic_slot(fake_nodes_module, TypeResolver):
+    """A DynamicSlot input reports its auto-derived slotType (union of `when` types)."""
+    from comfy_api.latest import _io as io
+
+    class DSNode(io.ComfyNode):
+        @classmethod
+        def define_schema(cls):
+            return io.Schema(
+                node_id="DSNode",
+                inputs=[
+                    io.DynamicSlot.Input("slot", options=[
+                        io.DynamicSlot.Option(when=io.Image, inputs=[]),
+                        io.DynamicSlot.Option(when=io.Latent, inputs=[]),
+                    ]),
+                ],
+                outputs=[io.String.Output()],
+            )
+
+        @classmethod
+        def execute(cls, **kwargs):
+            return io.NodeOutput("")
+
+    DSNode.GET_SCHEMA()
+    fake_nodes_module["DSNode"] = DSNode
+    prompt = {"n": {"class_type": "DSNode", "inputs": {}}}
+    r = TypeResolver(prompt)
+    assert r.get_declared_slot_io_type("n", "slot") == "IMAGE,LATENT"
+
+
 def test_compute_live_input_types_mixes_links_and_literals(fake_nodes_module, TypeResolver):
     fake_nodes_module["Src"] = _v1_node(("MODEL",))
     fake_nodes_module["Sink"] = _v1_node(
