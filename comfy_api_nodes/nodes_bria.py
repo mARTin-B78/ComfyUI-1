@@ -251,12 +251,17 @@ class BriaRemoveVideoBackground(IO.ComfyNode):
             node_id="BriaRemoveVideoBackground",
             display_name="Bria Remove Video Background",
             category="partner/video/Bria",
-            description="Remove the background from a video using Bria. ",
+            description="Remove the background from a video using Bria. Pick a color to composite "
+            "the foreground over a solid background (returns an MP4), or pick 'Transparent' to "
+            "get a WebM/VP9 video with a real alpha channel. Connect Transparent output directly "
+            "to Save Video to write the alpha-channel WebM to disk; for per-frame compositing "
+            "(images + mask sockets), use 'Bria Remove Video Background (Transparent)' instead.",
             inputs=[
                 IO.Video.Input("video"),
                 IO.Combo.Input(
                     "background_color",
                     options=[
+                        "Transparent",
                         "Black",
                         "White",
                         "Gray",
@@ -268,7 +273,11 @@ class BriaRemoveVideoBackground(IO.ComfyNode):
                         "Magenta",
                         "Orange",
                     ],
-                    tooltip="Background color for the output video.",
+                    tooltip="Background color for the output video. 'Transparent' returns a "
+                    "WebM/VP9 video with an alpha channel (best paired with Save Video); other "
+                    "options composite the foreground over the chosen solid color and return an MP4. "
+                    "For per-frame compositing (images + mask sockets) use 'Bria Remove Video "
+                    "Background (Transparent)' instead.",
                 ),
                 IO.Int.Input(
                     "seed",
@@ -301,13 +310,17 @@ class BriaRemoveVideoBackground(IO.ComfyNode):
         seed: int,
     ) -> IO.NodeOutput:
         validate_video_duration(video, max_duration=60.0)
+        # Bria returns 422 if background_color="Transparent" is paired with mp4_h264
+        # (no alpha plane). VP9-in-WebM carries the alpha; downstream VIDEO handling
+        # preserves it as long as Save Video uses auto/auto (stream-copy) settings.
+        output_container_and_codec = "webm_vp9" if background_color == "Transparent" else "mp4_h264"
         response = await sync_op(
             cls,
             ApiEndpoint(path="/proxy/bria/v2/video/edit/remove_background", method="POST"),
             data=BriaRemoveVideoBackgroundRequest(
                 video=await upload_video_to_comfyapi(cls, video),
                 background_color=background_color,
-                output_container_and_codec="mp4_h264",
+                output_container_and_codec=output_container_and_codec,
                 seed=seed,
             ),
             response_model=BriaStatusResponse,
@@ -504,8 +517,9 @@ class BriaTransparentVideoBackground(IO.ComfyNode):
             display_name="Bria Remove Video Background (Transparent)",
             category="partner/video/Bria",
             description="Remove the background from a video using Bria and return the cut-out frames "
-            "plus an alpha mask. Connect both to a compositing node, or feed them to Save WEBM to "
-            "write a transparent video.",
+            "plus an alpha mask, ready for per-frame compositing or feeding into Save WEBM. Use this "
+            "when you need IMAGE + MASK sockets; if you only need to save a transparent video file, "
+            "use 'Bria Remove Video Background' with background_color='Transparent' instead.",
             inputs=[
                 IO.Video.Input("video"),
                 IO.Int.Input(
