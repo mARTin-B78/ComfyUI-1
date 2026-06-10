@@ -3,7 +3,7 @@ Job utilities for the /api/jobs endpoint.
 Provides normalization and helper functions for job status tracking.
 """
 
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from comfy_api.internal import prune_dict
 from utils.cursor import (
@@ -16,6 +16,14 @@ from utils.cursor import (
 # is a derived value with no stable keyset, so it stays offset-only (matching the
 # cloud jobs implementation).
 CURSOR_SORT_FIELD = 'created_at'
+
+
+class JobsPage(NamedTuple):
+    """One page of the jobs listing, as returned by get_all_jobs."""
+    jobs: list[dict]
+    total_count: int
+    has_more: bool
+    next_cursor: Optional[str]
 
 
 class JobStatus:
@@ -293,6 +301,11 @@ def get_outputs_summary(outputs: dict) -> tuple[int, Optional[dict]]:
 
 
 def _job_id_key(job: dict) -> str:
+    # Job ids are server-assigned prompt UUIDs and are always present and
+    # unique, so the (sort_value, id) pair below is a valid keyset. The
+    # fallback is not part of that contract — it only keeps a malformed job
+    # dict from raising TypeError inside sorted() (None is unorderable
+    # against str).
     return job.get('id') or ''
 
 
@@ -357,7 +370,7 @@ def get_all_jobs(
     limit: Optional[int] = None,
     offset: int = 0,
     after: Optional[str] = None
-) -> tuple[list[dict], int, bool, Optional[str]]:
+) -> JobsPage:
     """
     Get all jobs (running, pending, completed) with filtering and sorting.
 
@@ -376,7 +389,7 @@ def get_all_jobs(
             InvalidCursorError on a malformed cursor.
 
     Returns:
-        tuple: (jobs_list, total_count, has_more, next_cursor)
+        JobsPage: (jobs, total_count, has_more, next_cursor)
         next_cursor is non-None only for created_at sort when more rows remain.
     """
     jobs = []
@@ -408,10 +421,22 @@ def get_all_jobs(
     total_count = len(jobs)
 
     use_cursor = after is not None and sort_by == CURSOR_SORT_FIELD
-    if use_cursor:
+    cursor_payload = (
+        decode_cursor(after, [CURSOR_SORT_FIELD], expected_order=sort_order)
+        if use_cursor
+        else None
+    )
+
+    # Early-out on an empty result set: nothing to page through and no cursor
+    # to mint, and downstream code never has to reason about indexing into an
+    # empty list. The cursor is still decoded above so a malformed `after` is
+    # rejected with INVALID_CURSOR even when there are no jobs.
+    if total_count == 0:
+        return JobsPage([], 0, False, None)
+
+    if cursor_payload is not None:
         ascending = sort_order == 'asc'
-        payload = decode_cursor(after, [CURSOR_SORT_FIELD], expected_order=sort_order)
-        cursor_key = (decode_cursor_int(payload), payload.id)
+        cursor_key = (decode_cursor_int(cursor_payload), cursor_payload.id)
         jobs = [
             j for j in jobs
             if (_job_keyset(j) > cursor_key if ascending else _job_keyset(j) < cursor_key)
@@ -436,7 +461,7 @@ def get_all_jobs(
             order=sort_order,
         )
 
-    return (jobs, total_count, has_more, next_cursor)
+    return JobsPage(jobs, total_count, has_more, next_cursor)
 
 
 def _job_keyset(job: dict) -> tuple[int, str]:
