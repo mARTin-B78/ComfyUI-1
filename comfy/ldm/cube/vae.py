@@ -353,9 +353,11 @@ class CubeShapeVAE(nn.Module):
 
 
 def grid_logits_to_mesh(grid_logit, grid_size, bbox_size, bbox_min, level=0.0):
-    """Marching cubes via skimage (matches upstream CPU fallback path)."""
-    from skimage import measure
-    vertices, faces, _, _ = measure.marching_cubes(grid_logit.cpu().numpy(), level, method="lewiner")
+    """Occupancy-logit grid -> mesh, using the vendored dependency-free marching cubes
+    (classic Lorensen, same family as upstream cube's default warp backend). The vertex
+    transform mirrors upstream: index coords -> bbox, with the same face winding flip."""
+    from comfy.ldm.cube.marching_cubes import marching_cubes
+    vertices, faces = marching_cubes(grid_logit, level)
     vertices = vertices / np.array(grid_size) * bbox_size + bbox_min
     faces = faces[:, [2, 1, 0]]
     return vertices.astype(np.float32), np.ascontiguousarray(faces)

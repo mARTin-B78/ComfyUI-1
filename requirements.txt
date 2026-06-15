@@ -31,7 +31,6 @@ blake3
 #non essential dependencies:
 kornia>=0.7.1
 spandrel
-scikit-image  # marching cubes for Cube3D (VAEDecodeCube)
 pydantic~=2.0
 pydantic-settings~=2.0
 PyOpenGL
