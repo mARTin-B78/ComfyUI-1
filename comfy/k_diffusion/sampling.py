@@ -1976,7 +1976,7 @@ def sample_cube(model, x, sigmas, extra_args=None, callback=None, disable=None, 
     Autoregressive sampler for Roblox Cube3D shape GPT (DualStreamRoformer).
 
     Not a diffusion sampler: the noised input `x` and `sigmas` values are ignored;
-    only x's shape (batch, num_tokens) is used. Generates a 1024-long sequence of VQ
+    only x's shape (batch, 1, num_tokens) is used. Generates a 1024-long sequence of VQ
     token IDs from CLIP text conditioning, with upstream's linearly-decaying CFG and
     optional top-p. Plugs into SamplerCustomAdvanced via the SamplerCube node.
 
@@ -2005,7 +2005,12 @@ def sample_cube(model, x, sigmas, extra_args=None, callback=None, disable=None, 
 
     device = x.device
     weight_dtype = base_model.get_dtype()
-    T = x.shape[1]
+    T = x.shape[-1]  # sequence length; latent is (batch, 1, num_tokens)
+    batch = x.shape[0]
+    import comfy.utils
+    pos = comfy.utils.repeat_to_batch_size(pos, batch)
+    if neg is not None:
+        neg = comfy.utils.repeat_to_batch_size(neg, batch)
     use_cfg = (cfg is not None) and (cfg > 0.0) and (neg is not None)
     autocast_enabled = (device.type == "cuda")
     cache_dtype = torch.bfloat16 if autocast_enabled else weight_dtype
@@ -2065,4 +2070,5 @@ def sample_cube(model, x, sigmas, extra_args=None, callback=None, disable=None, 
             if callback is not None:
                 callback({"x": x, "i": i, "sigma": sigmas[0], "sigma_hat": sigmas[0], "denoised": x})
 
-    return torch.cat(output_ids, dim=1).to(torch.float32)
+    # (B, T) token IDs -> (B, 1, T) to keep the channels-first 1D latent layout.
+    return torch.cat(output_ids, dim=1).to(torch.float32).unsqueeze(1)

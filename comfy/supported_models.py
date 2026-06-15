@@ -1560,7 +1560,7 @@ class Cube3D(supported_models_base.BASE):
 
     sampling_settings = {}
 
-    latent_format = latent_formats.LatentFormat
+    latent_format = latent_formats.Cube3D
 
     memory_usage_factor = 1.0
 

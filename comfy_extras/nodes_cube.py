@@ -38,10 +38,9 @@ class EmptyCubeLatent(IO.ComfyNode):
 
     @classmethod
     def execute(cls, num_tokens, batch_size) -> IO.NodeOutput:
-        # Trailing singleton dim keeps this a 3D latent so it flows through ComfyUI's
-        # conds/noise pipeline (encode_model_conds reads noise.shape[2]); the sampler
-        # only uses dim 1 (num_tokens).
-        latent = torch.zeros([batch_size, num_tokens, 1], device=comfy.model_management.intermediate_device())
+        # Channels-first 1D latent (B, 1, num_tokens), mirroring Hunyuan3Dv2's (B, C, L)
+        # convention (latent_channels=1). The sampler only uses the sequence length.
+        latent = torch.zeros([batch_size, 1, num_tokens], device=comfy.model_management.intermediate_device())
         return IO.NodeOutput({"samples": latent, "type": "cube_tokens"})
 
 

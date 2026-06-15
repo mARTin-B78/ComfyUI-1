@@ -775,6 +775,16 @@ class Hunyuan3Dv2mini(LatentFormat):
     latent_dimensions = 1
     scale_factor = 1.0188137142395404
 
+class Cube3D(LatentFormat):
+    # Roblox Cube3D shape "latent" is a flat sequence of VQ token IDs (one scalar per
+    # position), so it maps to a channels-first 1D latent (B, 1, num_tokens), mirroring
+    # Hunyuan3Dv2's (B, C, L) convention. latent_channels=1 keeps fix_empty_latent_channels
+    # from truncating the token sequence. scale_factor=1.0 since IDs must pass through
+    # process_latent_in/out unchanged.
+    latent_channels = 1
+    latent_dimensions = 1
+    scale_factor = 1.0
+
 class ACEAudio(LatentFormat):
     latent_channels = 8
     latent_dimensions = 2
