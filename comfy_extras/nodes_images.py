@@ -214,6 +214,7 @@ class SaveAnimatedWEBP(IO.ComfyNode):
             ],
             hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo],
             is_output_node=True,
+            cache_no_cascade=True,
             outputs=[IO.Image.Output(display_name="images")]
         )
 
@@ -249,6 +250,7 @@ class SaveAnimatedPNG(IO.ComfyNode):
             ],
             hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo],
             is_output_node=True,
+            cache_no_cascade=True,
             outputs=[IO.Image.Output(display_name="images")]
         )
 
@@ -513,6 +515,7 @@ class SaveSVGNode(IO.ComfyNode):
             ],
             hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo],
             is_output_node=True,
+            cache_no_cascade=True,
             outputs=[IO.SVG.Output("svg")],
         )
 
@@ -1156,40 +1159,42 @@ class SaveImageAdvanced(IO.ComfyNode):
                 IO.String.Input(
                     "filename_prefix",
                     default="ComfyUI",
-                    tooltip=(
-                        "The prefix for the file to save. May include formatting tokens "
-                        "such as %date:yyyy-MM-dd% or %Empty Latent Image.width%."
-                    ),
+                    tooltip=("The prefix for the file to save. May include formatting tokens such as %date:yyyy-MM-dd% or %Empty Latent Image.width%."),
                 ),
                 IO.DynamicCombo.Input(
                     "format",
                     options=[
                         IO.DynamicCombo.Option("png", [
-                            IO.Combo.Input("bit_depth", options=["8-bit", "16-bit"],
-                                           default="8-bit", advanced=True),
-                            IO.Combo.Input("input_color_space", options=["sRGB"],
-                                           default="sRGB", advanced=True),
+                            IO.Combo.Input(
+                                "bit_depth",
+                                options=["8-bit", "16-bit"],
+                                default="8-bit",
+                                advanced=True,
+                            ),
+                            IO.Combo.Input(
+                                "input_color_space",
+                                options=["sRGB"],
+                                default="sRGB",
+                                advanced=True,
+                            ),
                         ]),
                         IO.DynamicCombo.Option("exr", [
-                            IO.Combo.Input("bit_depth", options=["32-bit float"],
-                                           default="32-bit float", advanced=True),
+                            IO.Combo.Input(
+                                "bit_depth",
+                                options=["32-bit float"],
+                                default="32-bit float",
+                                advanced=True,
+                            ),
                             IO.Combo.Input(
                                 "input_color_space",
                                 options=["sRGB", "HDR", "linear"],
                                 default="sRGB",
                                 advanced=True,
                                 tooltip=(
-                                    "Colorspace of the input tensor. The EXR is "
-                                    "always written as scene-linear in the matching "
-                                    "gamut.\n"
-                                    "  'sRGB'   — input is sRGB-encoded Rec.709; "
-                                    "the inverse sRGB EOTF is applied.\n"
-                                    "  'HDR'    — input is HLG-encoded Rec.2020 "
-                                    "(BT.2100); the inverse HLG OETF is applied "
-                                    "to get scene-linear light.\n"
-                                    "  'linear' — input is already scene-linear "
-                                    "(Rec.709 primaries); written through unchanged. "
-                                    "Use this for renderer/compositor output."
+                                    "Colorspace of the input tensor. The EXR is always written as scene-linear in the matching gamut.\n"
+                                    "sRGB — input is sRGB-encoded Rec.709; the inverse sRGB EOTF is applied.\n"
+                                    "HDR — input is HLG-encoded Rec.2020 (BT.2100); the inverse HLG OETF is applied to get scene-linear light.\n"
+                                    "linear — input is already scene-linear (Rec.709 primaries); written through unchanged. Use this for renderer/compositor output."
                                 ),
                             ),
                         ]),
@@ -1199,6 +1204,7 @@ class SaveImageAdvanced(IO.ComfyNode):
             ],
             hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo],
             is_output_node=True,
+            cache_no_cascade=True,
             outputs=[IO.Image.Output(display_name="images")]
         )
 

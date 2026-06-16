@@ -14,6 +14,7 @@ import nodes
 from comfy_execution.graph_utils import is_link
 
 NODE_CLASS_CONTAINS_UNIQUE_ID: Dict[str, bool] = {}
+NODE_CLASS_CACHE_NO_CASCADE: Dict[str, bool] = {}
 
 
 def include_unique_id_in_input(class_type: str) -> bool:
@@ -22,6 +23,16 @@ def include_unique_id_in_input(class_type: str) -> bool:
     class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
     NODE_CLASS_CONTAINS_UNIQUE_ID[class_type] = "UNIQUE_ID" in class_def.INPUT_TYPES().get("hidden", {}).values()
     return NODE_CLASS_CONTAINS_UNIQUE_ID[class_type]
+
+
+def is_cache_no_cascade(class_type: str) -> bool:
+    """Whether changes to this node's widget inputs should not invalidate downstream caches."""
+    if class_type in NODE_CLASS_CACHE_NO_CASCADE:
+        return NODE_CLASS_CACHE_NO_CASCADE[class_type]
+    class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
+    NODE_CLASS_CACHE_NO_CASCADE[class_type] = bool(getattr(class_def, "CACHE_NO_CASCADE", False))
+    return NODE_CLASS_CACHE_NO_CASCADE[class_type]
+
 
 class CacheKeySet(ABC):
     def __init__(self, dynprompt, node_ids, is_changed_cache):
@@ -101,12 +112,12 @@ class CacheKeySetInputSignature(CacheKeySet):
     async def get_node_signature(self, dynprompt, node_id):
         signature = []
         ancestors, order_mapping = self.get_ordered_ancestry(dynprompt, node_id)
-        signature.append(await self.get_immediate_node_signature(dynprompt, node_id, order_mapping))
+        signature.append(await self.get_immediate_node_signature(dynprompt, node_id, order_mapping, as_ancestor=False))
         for ancestor_id in ancestors:
-            signature.append(await self.get_immediate_node_signature(dynprompt, ancestor_id, order_mapping))
+            signature.append(await self.get_immediate_node_signature(dynprompt, ancestor_id, order_mapping, as_ancestor=True))
         return to_hashable(signature)
 
-    async def get_immediate_node_signature(self, dynprompt, node_id, ancestor_order_mapping):
+    async def get_immediate_node_signature(self, dynprompt, node_id, ancestor_order_mapping, as_ancestor=False):
         if not dynprompt.has_node(node_id):
             # This node doesn't exist -- we can't cache it.
             return [float("NaN")]
@@ -117,12 +128,13 @@ class CacheKeySetInputSignature(CacheKeySet):
         if self.include_node_id_in_input() or (hasattr(class_def, "NOT_IDEMPOTENT") and class_def.NOT_IDEMPOTENT) or include_unique_id_in_input(class_type):
             signature.append(node_id)
         inputs = node["inputs"]
+        skip_widgets = as_ancestor and is_cache_no_cascade(class_type)
         for key in sorted(inputs.keys()):
             if is_link(inputs[key]):
                 (ancestor_id, ancestor_socket) = inputs[key]
                 ancestor_index = ancestor_order_mapping[ancestor_id]
                 signature.append((key,("ANCESTOR", ancestor_index, ancestor_socket)))
-            else:
+            elif not skip_widgets:
                 signature.append((key, inputs[key]))
         return signature
 

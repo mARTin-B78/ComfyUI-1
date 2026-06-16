@@ -168,6 +168,7 @@ class SaveAudio(IO.ComfyNode):
             hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo],
             is_deprecated=True,
             is_output_node=True,
+            cache_no_cascade=True,
             outputs=[IO.Audio.Output("audio")]
         )
 
@@ -198,6 +199,7 @@ class SaveAudioMP3(IO.ComfyNode):
             hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo],
             is_deprecated=True,
             is_output_node=True,
+            cache_no_cascade=True,
             outputs=[IO.Audio.Output("audio")]
         )
 
@@ -229,6 +231,7 @@ class SaveAudioOpus(IO.ComfyNode):
             hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo],
             is_deprecated=True,
             is_output_node=True,
+            cache_no_cascade=True,
             outputs=[IO.Audio.Output("audio")]
         )
 
@@ -258,20 +261,25 @@ class SaveAudioAdvanced(IO.ComfyNode):
                 IO.String.Input(
                     "filename_prefix",
                     default="audio/ComfyUI",
-                    tooltip=(
-                        "The prefix for the file to save. May include formatting tokens "
-                        "such as %date:yyyy-MM-dd%."
-                    ),
+                    tooltip=("The prefix for the file to save. May include formatting tokens such as %date:yyyy-MM-dd%."),
                 ),
                 IO.DynamicCombo.Input(
                     "format",
                     options=[
                         IO.DynamicCombo.Option("flac", []),
                         IO.DynamicCombo.Option("mp3", [
-                            IO.Combo.Input("quality", options=["V0", "128k", "320k"], default="V0"),
+                            IO.Combo.Input(
+                                "quality",
+                                options=["V0", "128k", "320k"],
+                                default="V0",
+                            ),
                         ]),
                         IO.DynamicCombo.Option("opus", [
-                            IO.Combo.Input("quality", options=["64k", "96k", "128k", "192k", "320k"], default="128k"),
+                            IO.Combo.Input(
+                                "quality",
+                                options=["64k", "96k", "128k", "192k", "320k"],
+                                default="128k",
+                            ),
                         ]),
                     ],
                     tooltip="The file format in which to save the audio.",
@@ -279,6 +287,8 @@ class SaveAudioAdvanced(IO.ComfyNode):
             ],
             hidden=[IO.Hidden.prompt, IO.Hidden.extra_pnginfo],
             is_output_node=True,
+            cache_no_cascade=True,
+            outputs=[IO.Audio.Output("audio")],
         )
 
     @classmethod
@@ -289,7 +299,7 @@ class SaveAudioAdvanced(IO.ComfyNode):
             ui=UI.AudioSaveHelper.get_save_audio_ui(audio, filename_prefix=filename_prefix, cls=cls, format=file_format, quality=quality)
         else:
             ui=UI.AudioSaveHelper.get_save_audio_ui(audio, filename_prefix=filename_prefix, cls=cls, format=file_format)
-        return IO.NodeOutput(ui=ui)
+        return IO.NodeOutput(audio, ui=ui)
 
 
 class PreviewAudio(IO.ComfyNode):

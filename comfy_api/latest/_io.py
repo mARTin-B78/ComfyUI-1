@@ -1600,6 +1600,8 @@ class Schema:
     """Optional client-evaluated pricing badge declaration for this node."""
     not_idempotent: bool=False
     """Flags a node as not idempotent; when True, the node will run and not reuse the cached outputs when identical inputs are provided on a different node in the graph."""
+    cache_no_cascade: bool=False
+    """When True, changes to this node's widget inputs re-run this node but do not invalidate the caches of downstream nodes. Use for passthrough nodes whose widget inputs only affect side effects (e.g. a save node's filename), not the data passed to its outputs."""
     enable_expand: bool=False
     """Flags a node as expandable, allowing NodeOutput to include 'expand' property."""
     accept_all_inputs: bool=False
@@ -2065,6 +2067,14 @@ class _ComfyNodeBaseInternal(_ComfyNodeInternal):
             cls.GET_SCHEMA()
         return cls._NOT_IDEMPOTENT
 
+    _CACHE_NO_CASCADE = None
+    @final
+    @classproperty
+    def CACHE_NO_CASCADE(cls):  # noqa
+        if cls._CACHE_NO_CASCADE is None:
+            cls.GET_SCHEMA()
+        return cls._CACHE_NO_CASCADE
+
     _ACCEPT_ALL_INPUTS = None
     @final
     @classproperty
@@ -2115,6 +2125,8 @@ class _ComfyNodeBaseInternal(_ComfyNodeInternal):
             cls._INPUT_IS_LIST = schema.is_input_list
         if cls._NOT_IDEMPOTENT is None:
             cls._NOT_IDEMPOTENT = schema.not_idempotent
+        if cls._CACHE_NO_CASCADE is None:
+            cls._CACHE_NO_CASCADE = schema.cache_no_cascade
         if cls._ACCEPT_ALL_INPUTS is None:
             cls._ACCEPT_ALL_INPUTS = schema.accept_all_inputs
 

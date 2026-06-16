@@ -23,10 +23,18 @@ class SaveWEBM(io.ComfyNode):
                 io.String.Input("filename_prefix", default="ComfyUI"),
                 io.Combo.Input("codec", options=["vp9", "av1"]),
                 io.Float.Input("fps", default=24.0, min=0.01, max=1000.0, step=0.01),
-                io.Float.Input("crf", default=32.0, min=0, max=63.0, step=1, tooltip="Higher crf means lower quality with a smaller file size, lower crf means higher quality higher filesize."),
+                io.Float.Input(
+                    "crf",
+                    default=32.0,
+                    min=0,
+                    max=63.0,
+                    step=1,
+                    tooltip="Higher crf means lower quality with a smaller file size, lower crf means higher quality higher filesize.",
+                ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
+            cache_no_cascade=True,
             outputs=[io.Image.Output(display_name="images")]
         )
 
@@ -90,6 +98,7 @@ class SaveVideo(io.ComfyNode):
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
+            cache_no_cascade=True,
             outputs=[io.Video.Output("video")],
         )
 
