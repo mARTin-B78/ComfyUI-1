@@ -445,7 +445,7 @@ def cancel_job(
     running: list,
     queued: list,
     history: dict,
-    interrupt: Callable[[], None],
+    interrupt: Callable[[str], bool],
     dequeue: Callable[[str], bool],
 ) -> str:
     """Cancel a single job by id, regardless of state.
@@ -457,21 +457,32 @@ def cancel_job(
       - an unknown id is a no-op (callers that need fail-fast behaviour should
         validate ids up front with ``classify_job_for_cancel``)
 
-    Returns the classification that was acted on (one of the CANCEL_* values),
-    so callers can log or report what happened.
+    Both ``interrupt`` and ``dequeue`` take the prompt id and return whether
+    they acted on a job that was *actually* in that state, so the value returned
+    here reflects what truly happened rather than the (possibly stale)
+    classification. This matters around the narrow TOCTOU windows where a job
+    changes state between the caller's snapshot and the action:
 
-    For pending jobs the returned value reflects the *actual* dequeue result:
-    if the job left the queue between the caller's snapshot and the dequeue
-    call (a narrow TOCTOU window), the dequeue returns False and this function
-    returns CANCEL_UNKNOWN rather than CANCEL_PENDING, so callers that map the
-    return to a ``cancelled`` boolean never report a cancel that did not happen.
+      - a job classified RUNNING may have finished before ``interrupt`` fires:
+        ``interrupt`` returns False and this returns CANCEL_UNKNOWN (no-op).
+      - a job classified PENDING may have started executing before ``dequeue``
+        fires: ``dequeue`` returns False, ``interrupt`` then catches the now-
+        running job and this returns CANCEL_RUNNING. If it had simply finished
+        instead, both return False and this returns CANCEL_UNKNOWN.
+
+    ``interrupt`` must be atomic — interrupt the job only if it is still the one
+    running — so a cancel can never land on an unrelated prompt that started in
+    the meantime (see ``execution.PromptQueue.interrupt_if_running``).
     """
     classification = classify_job_for_cancel(prompt_id, running, queued, history)
     if classification == CANCEL_RUNNING:
-        interrupt()
-    elif classification == CANCEL_PENDING:
-        if not dequeue(prompt_id):
-            # Job was no longer in the queue by the time we tried to remove it.
-            return CANCEL_UNKNOWN
+        return CANCEL_RUNNING if interrupt(prompt_id) else CANCEL_UNKNOWN
+    if classification == CANCEL_PENDING:
+        if dequeue(prompt_id):
+            return CANCEL_PENDING
+        # Left the pending queue between classification and dequeue: if it
+        # started executing, interrupt the now-running job; otherwise it has
+        # already finished and the cancel is a genuine no-op.
+        return CANCEL_RUNNING if interrupt(prompt_id) else CANCEL_UNKNOWN
     # CANCEL_TERMINAL and CANCEL_UNKNOWN are intentional no-ops.
     return classification

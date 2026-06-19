@@ -14,10 +14,8 @@ from comfy_execution.jobs import (
     get_all_jobs,
     validate_job_id,
     cancel_job,
-    classify_job_for_cancel,
     CANCEL_PENDING,
     CANCEL_RUNNING,
-    CANCEL_UNKNOWN,
 )
 import uuid
 import urllib
@@ -922,9 +920,12 @@ class PromptServer():
             running, queued = self.prompt_queue.get_current_queue()
             history = self.prompt_queue.get_history()
 
-            def interrupt():
-                logging.info(f"Cancelling running prompt {job_id}")
-                nodes.interrupt_processing()
+            def interrupt(prompt_id):
+                logging.info(f"Cancelling running prompt {prompt_id}")
+                # Atomic: only interrupts if the job is still the one running,
+                # so a cancel can't land on a prompt that started in the gap
+                # since the snapshot above. Returns whether it actually fired.
+                return self.prompt_queue.interrupt_if_running(prompt_id)
 
             def dequeue(prompt_id):
                 logging.info(f"Cancelling pending prompt {prompt_id}")
@@ -957,9 +958,13 @@ class PromptServer():
 
             Body: {"job_ids": ["<uuid>", ...]}
 
-            Fail-fast: if any provided id is unknown (not running, pending, or
-            in history) the request returns 404 and no job is cancelled, so the
-            call has no partial side effects.
+            Best-effort and idempotent: every well-formed id is cancelled if it
+            is running or pending; ids that are already finished or unknown are
+            no-ops, not errors. A batch of all no-ops still returns 200 with
+            {"cancelled": false}. This matches the single-cancel endpoint and
+            means "cancel all" still cancels the in-progress jobs even if some
+            finished between the client's snapshot and the request. Malformed
+            ids are still rejected up front with 400 (see below).
             """
             try:
                 json_data = await request.json()
@@ -993,22 +998,9 @@ class PromptServer():
                     status=400,
                 )
 
-            # Validate every id exists before cancelling anything. A snapshot of
-            # the queue + history is taken once so the membership check is
-            # consistent for the whole batch.
-            running, queued = self.prompt_queue.get_current_queue()
-            history = self.prompt_queue.get_history()
-
-            unknown_ids = [
-                jid for jid in job_ids
-                if classify_job_for_cancel(jid, running, queued, history) == CANCEL_UNKNOWN
-            ]
-            if unknown_ids:
-                return web.json_response(
-                    {"error": "Job(s) not found", "unknown_ids": unknown_ids},
-                    status=404
-                )
-
+            # Best-effort: cancel each id that is still running/pending; an id
+            # that has finished or never existed is a no-op rather than a reason
+            # to fail the whole batch.
             cancelled = False
             for jid in job_ids:
                 if _cancel_job_by_id(jid):
