@@ -259,3 +259,92 @@ def test_tags_prefix_treats_underscore_literal(
     assert tag_ok in names, f"Expected {tag_ok} to be returned for prefix '{base}_'"
     assert tag_bad not in names, f"'{tag_bad}' must not match — '_' is not a wildcard"
     assert body["total"] == 1
+
+
+def _upload_model(http, api_base, name, tags):
+    """Upload a fresh filesystem-backed model asset, returning the response dict."""
+    content = uuid.uuid4().bytes + b"W" * (4096 - 16)
+    files = {"file": (name, content, "application/octet-stream")}
+    form = {"tags": json.dumps(tags), "name": name, "user_metadata": json.dumps({})}
+    r = http.post(api_base + "/api/assets", files=files, data=form, timeout=120)
+    body = r.json()
+    assert r.status_code == 201, body
+    return body
+
+
+def test_edit_type_moves_file_and_reregisters(
+    http: requests.Session,
+    api_base: str,
+    comfy_tmp_base_dir,
+):
+    """BE-1641: a flag-on model_type: edit MOVEs the file to the new folder.
+
+    Mirrors the FE edit-type flow (remove old model_type:, add new) and asserts
+    both the tag set and the on-disk location end up coherent.
+    """
+
+    name = f"edit_type_{uuid.uuid4().hex[:8]}.safetensors"
+    asset = _upload_model(http, api_base, name, ["models", "model_type:checkpoints", "unit-tests"])
+    aid = asset["id"]
+
+    models_dir = comfy_tmp_base_dir / "models"
+    rel = asset["user_metadata"]["filename"]
+    src_path = models_dir / "checkpoints" / rel
+    dst_path = models_dir / "loras" / rel
+    assert src_path.is_file(), f"uploaded model should be under checkpoints: {src_path}"
+
+    # FE edit-type: DELETE old model_type:, then POST the new one.
+    rd = http.delete(
+        f"{api_base}/api/assets/{aid}/tags",
+        json={"tags": ["model_type:checkpoints"]},
+        timeout=120,
+    )
+    assert rd.status_code == 200, rd.json()
+
+    ra = http.post(
+        f"{api_base}/api/assets/{aid}/tags",
+        json={"tags": ["model_type:loras"]},
+        timeout=120,
+    )
+    assert ra.status_code == 200, ra.json()
+
+    # File relocated on disk, no stale copy left behind.
+    assert dst_path.is_file(), f"file should have moved to loras: {dst_path}"
+    assert not src_path.exists(), "stale checkpoints copy must be gone"
+
+    # Tag set is coherent with the new location.
+    rg = http.get(f"{api_base}/api/assets/{aid}", timeout=120)
+    detail = rg.json()
+    assert rg.status_code == 200, detail
+    tags = set(detail["tags"])
+    assert "model_type:loras" in tags
+    assert "model_type:checkpoints" not in tags
+    assert "models" in tags
+
+    http.delete(f"{api_base}/api/assets/{aid}", timeout=30)
+
+
+def test_edit_type_unknown_folder_is_label_only(
+    http: requests.Session,
+    api_base: str,
+):
+    """An unregistered model_type: target stays a plain label (no move/reject).
+
+    Core stays permissive about model_type: labels; only a registered folder
+    triggers the edit-type move. The file must not move.
+    """
+    name = f"edit_bad_{uuid.uuid4().hex[:8]}.safetensors"
+    asset = _upload_model(http, api_base, name, ["models", "model_type:checkpoints", "unit-tests"])
+    aid = asset["id"]
+
+    r = http.post(
+        f"{api_base}/api/assets/{aid}/tags",
+        json={"tags": ["model_type:does_not_exist"]},
+        timeout=120,
+    )
+    body = r.json()
+    assert r.status_code == 200, body
+    assert "model_type:does_not_exist" in body["total_tags"]
+    assert "model_type:checkpoints" in body["total_tags"]
+
+    http.delete(f"{api_base}/api/assets/{aid}", timeout=30)

@@ -2,11 +2,13 @@ import contextlib
 import logging
 import mimetypes
 import os
+import shutil
 from typing import Any, Sequence
 
 from sqlalchemy.orm import Session
 
 import app.assets.services.hashing as hashing
+from app.assets.database.models import AssetReference
 from app.assets.database.queries import (
     add_tags_to_reference,
     count_active_siblings,
@@ -20,6 +22,7 @@ from app.assets.database.queries import (
     list_references_by_asset_id,
     reference_exists,
     remove_missing_tag_for_asset_id,
+    remove_tags_from_reference,
     set_reference_metadata,
     set_reference_system_metadata,
     set_reference_tags,
@@ -35,7 +38,9 @@ from app.assets.services.image_dimensions import extract_image_dimensions
 from app.assets.services.path_utils import (
     compute_relative_filename,
     get_backend_system_tags_from_path,
+    get_model_base_for_folder,
     get_name_and_tags_from_asset_path,
+    model_folders_for_path,
     resolve_destination_from_tags,
     validate_path_within_base,
 )
@@ -451,6 +456,186 @@ class DependencyMissingError(Exception):
     def __init__(self, message: str):
         self.message = message
         super().__init__(message)
+
+
+class ModelMoveError(Exception):
+    """A model_type: edit could not be applied coherently (BE-1641).
+
+    Carries an HTTP-ish ``status``/``code`` so the route can surface a precise
+    4xx (rather than the generic 404 the bare ValueError path produces). The FE
+    edit-type flow compensates on any non-2xx by re-adding the prior
+    ``model_type:`` tag, so a reject here leaves the asset coherent.
+    """
+
+    def __init__(self, code: str, message: str, status: int = 409):
+        self.code = code
+        self.message = message
+        self.status = status
+        super().__init__(message)
+
+
+def _move_file(src: str, dst: str) -> None:
+    """Relocate a file, falling back to a cross-device copy+unlink.
+
+    ``os.replace`` is atomic but fails with ``EXDEV`` when src and dst live on
+    different filesystems (``extra_model_paths`` may point at another mount), so
+    fall back to ``shutil.move`` there.
+    """
+    try:
+        os.replace(src, dst)
+    except OSError:
+        shutil.move(src, dst)
+
+
+def relocate_model_asset_for_model_type_tags(
+    session: Session,
+    ref: AssetReference,
+    requested_tags: Sequence[str],
+    origin: str = "automatic",
+) -> bool:
+    """Move a filesystem-backed model asset to match an added ``model_type:`` tag.
+
+    BE-1641 / spec-drift §2: under the ``supports_model_type_tags`` contract a
+    ``model_type:`` edit must stay coherent on *edit*, not just upload. When a
+    ``model_type:<folder>`` tag is applied to a filesystem-backed model asset
+    whose file is not already under that folder, move the file to the folder's
+    base and re-derive the path-based system tags so location and label agree.
+
+    Mutates ``ref`` and its tags in-place within ``session`` (the caller owns
+    the commit). Returns True if a physical move happened, False otherwise
+    (non-filesystem / hash-only / non-model asset, no ``model_type:`` added, or
+    the target folder already covers the current path — the shared-dir case in
+    spec-drift §1).
+
+    Raises:
+        ModelMoveError: the target folder is unknown, or the destination is
+            already occupied (collision) — never clobbers (Q2).
+    """
+    if not ref.file_path:
+        # API-created / hash-only reference: nothing on disk to move. Labels
+        # stay labels (matches AC scope: "filesystem-backed model asset").
+        return False
+
+    requested_folders = [
+        t.split(":", 1)[1]
+        for t in normalize_tags(list(requested_tags))
+        if t.startswith("model_type:") and t.split(":", 1)[1]
+    ]
+    if not requested_folders:
+        return False
+
+    old_path = os.path.abspath(ref.file_path)
+    current_folders = set(model_folders_for_path(old_path))
+    if not current_folders:
+        # Not under any model base (e.g. an input/output asset). A model_type:
+        # label here is meaningless for placement; leave it as a plain label.
+        return False
+
+    # The FE emits exactly one model_type: per edit; if several are requested,
+    # the last one wins deterministically.
+    target_folder = requested_folders[-1]
+
+    # Shared on-disk dir (spec-drift §1): the path already covers the target
+    # folder, so re-deriving would keep both twins — no physical move needed.
+    if target_folder in current_folders:
+        return False
+
+    # An unregistered folder_name cannot correspond to any real on-disk
+    # location, so there is nothing to relocate. Keep Core's established
+    # permissive model_type: labeling (spec-drift §3: Core is local/trusted and
+    # does not reject model_type: labels) — store it as a plain label, don't
+    # reject. A genuine edit-type action always targets a registered folder_name
+    # from the discovery vocabulary, so this only affects manual label adds.
+    try:
+        new_base = get_model_base_for_folder(target_folder)
+    except ValueError:
+        return False
+
+    rel = compute_relative_filename(old_path)
+    if not rel:
+        raise ModelMoveError(
+            "INVALID_MODEL_PATH",
+            f"cannot determine relative path for model asset: {old_path}",
+            status=400,
+        )
+    new_path = os.path.abspath(os.path.join(new_base, rel))
+    try:
+        validate_path_within_base(new_path, new_base)
+    except ValueError as e:
+        raise ModelMoveError("INVALID_MODEL_PATH", str(e), status=400)
+
+    if new_path == old_path:
+        return False
+
+    # Q2: collision -> reject, never clobber. Cover both an on-disk file and a
+    # reference that already owns the destination path.
+    if os.path.exists(new_path):
+        raise ModelMoveError(
+            "DESTINATION_EXISTS", f"destination already exists: {new_path}"
+        )
+    if get_reference_by_file_path(session, new_path) is not None:
+        raise ModelMoveError(
+            "DESTINATION_EXISTS", f"destination already registered: {new_path}"
+        )
+
+    os.makedirs(os.path.dirname(new_path), exist_ok=True)
+    _move_file(old_path, new_path)
+    try:
+        _reregister_moved_reference(session, ref, new_path, origin=origin)
+    except Exception:
+        # Never half-move: roll the file back before surfacing the failure.
+        with contextlib.suppress(Exception):
+            _move_file(new_path, old_path)
+        raise
+    return True
+
+
+def _reregister_moved_reference(
+    session: Session,
+    ref: AssetReference,
+    new_path: str,
+    origin: str = "automatic",
+) -> None:
+    """Point ``ref`` at ``new_path`` and reconcile path-derived system tags.
+
+    Re-derives ``models`` + ``model_type:*`` from the new location, drops any
+    stale ``model_type:`` no longer justified by the path, and refreshes the
+    relative ``filename`` metadata. User labels are left untouched.
+    """
+    # Bytes are unchanged by a move; only the location and mtime can shift
+    # (shutil.move's cross-device fallback re-stats).
+    _size_bytes, mtime_ns = get_size_and_mtime_ns(new_path)
+    ref.file_path = new_path
+    ref.mtime_ns = mtime_ns
+    ref.updated_at = get_utc_now()
+    session.flush()
+
+    derived = get_backend_system_tags_from_path(new_path)
+    derived_model_types = {t for t in derived if t.startswith("model_type:")}
+
+    current = set(get_reference_tags(session, reference_id=ref.id))
+    stale = {
+        t for t in current if t.startswith("model_type:")
+    } - derived_model_types
+    if stale:
+        remove_tags_from_reference(
+            session, reference_id=ref.id, tags=sorted(stale)
+        )
+    add_tags_to_reference(
+        session,
+        reference_id=ref.id,
+        tags=derived,
+        origin=origin,
+        create_if_missing=True,
+    )
+
+    _update_metadata_with_filename(
+        session,
+        reference_id=ref.id,
+        file_path=new_path,
+        current_metadata=ref.user_metadata,
+        user_metadata={},
+    )
 
 
 def upload_from_temp_path(

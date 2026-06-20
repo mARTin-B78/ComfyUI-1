@@ -25,6 +25,44 @@ def get_comfy_models_folders() -> list[tuple[str, list[str]]]:
     return targets
 
 
+def get_model_base_for_folder(folder_name: str) -> str:
+    """Resolve a registered model ``folder_name`` to its canonical base path.
+
+    This is the single-valued reverse lookup (model_type -> on-disk base) the
+    upload destination and the edit-type move (BE-1641) share: resolve the one
+    named folder to its first configured base. Never fans out.
+
+    Raises:
+        ValueError: the folder_name is not registered, or has no base path.
+    """
+    model_folder_paths = dict(get_comfy_models_folders())
+    try:
+        bases = model_folder_paths[folder_name]
+    except KeyError:
+        raise ValueError(f"unknown model category '{folder_name}'")
+    if not bases:
+        raise ValueError(f"no base path configured for category '{folder_name}'")
+    return os.path.abspath(bases[0])
+
+
+def model_folders_for_path(path: str) -> list[str]:
+    """Return every model folder_name whose registered base covers ``path``.
+
+    Set-valued (spec-drift §1): a path shared by >=2 registered folders (e.g.
+    ``diffusion_models`` and ``unet_gguf`` both registering ``models/unet``)
+    belongs to all of them. Purely lexical — does not require the file to exist.
+    Empty when ``path`` is not under any model base (e.g. an input/output file).
+    """
+    fp_path = Path(os.path.abspath(path))
+    out: list[str] = []
+    for folder_name, bases in get_comfy_models_folders():
+        for base in bases:
+            if fp_path.is_relative_to(os.path.abspath(base)):
+                out.append(folder_name)
+                break
+    return out
+
+
 def _validate_subfolder(subfolder: str | None) -> list[str]:
     if not subfolder:
         return []
@@ -65,14 +103,7 @@ def resolve_destination_from_tags(
         folder_name = model_type_tags[0].split(":", 1)[1]
         if not folder_name:
             raise ValueError("models uploads require exactly one model_type:<folder_name> tag")
-        model_folder_paths = dict(get_comfy_models_folders())
-        try:
-            bases = model_folder_paths[folder_name]
-        except KeyError:
-            raise ValueError(f"unknown model category '{folder_name}'")
-        if not bases:
-            raise ValueError(f"no base path configured for category '{folder_name}'")
-        base_dir = os.path.abspath(bases[0])
+        base_dir = get_model_base_for_folder(folder_name)
     elif root == "input":
         base_dir = os.path.abspath(folder_paths.get_input_directory())
     else:

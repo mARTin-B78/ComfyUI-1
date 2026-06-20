@@ -26,6 +26,7 @@ from app.assets.seeder import ScanInProgressError, asset_seeder
 from app.assets.services import (
     DependencyMissingError,
     HashMismatchError,
+    ModelMoveError,
     apply_tags,
     asset_exists,
     create_from_hash,
@@ -623,6 +624,11 @@ async def add_asset_tags(request: web.Request) -> web.Response:
             already_present=result.already_present,
             total_tags=result.total_tags,
         )
+    except ModelMoveError as me:
+        # A model_type: edit that couldn't be applied coherently (unknown
+        # folder, or destination collision). The FE re-adds the prior
+        # model_type: tag on a non-2xx, so the asset stays coherent.
+        return _build_error_response(me.status, me.code, me.message, {"id": reference_id})
     except PermissionError as pe:
         return _build_error_response(403, "FORBIDDEN", str(pe), {"id": reference_id})
     except ValueError as ve:

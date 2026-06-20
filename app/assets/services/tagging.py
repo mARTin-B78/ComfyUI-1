@@ -9,6 +9,7 @@ from app.assets.database.queries import (
     remove_tags_from_reference,
 )
 from app.assets.database.queries.tags import list_tag_counts_for_filtered_assets
+from app.assets.services.ingest import relocate_model_asset_for_model_type_tags
 from app.assets.services.schemas import TagUsage
 from app.database.db import create_session
 
@@ -21,6 +22,12 @@ def apply_tags(
 ) -> AddTagsResult:
     with create_session() as session:
         ref_row = get_reference_with_owner_check(session, reference_id, owner_id)
+
+        # BE-1641: a flag-on model_type: edit on a filesystem-backed model asset
+        # must MOVE/re-register the file so its location stays coherent with the
+        # label (not a label-only relabel). Runs before the label add so the
+        # path-derived system tags are reconciled first; may raise ModelMoveError.
+        relocate_model_asset_for_model_type_tags(session, ref_row, tags)
 
         result = add_tags_to_reference(
             session,

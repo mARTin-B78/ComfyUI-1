@@ -22,9 +22,11 @@ from app.assets.services.file_utils import (
 from app.assets.services.ingest import (
     DependencyMissingError,
     HashMismatchError,
+    ModelMoveError,
     create_from_hash,
     ingest_existing_file,
     register_output_files,
+    relocate_model_asset_for_model_type_tags,
     upload_from_temp_path,
 )
 from app.assets.database.queries import (
@@ -62,8 +64,10 @@ __all__ = [
     "HashMismatchError",
     "IngestResult",
     "ListAssetsResult",
+    "ModelMoveError",
     "RegisterAssetResult",
     "RemoveTagsResult",
+    "relocate_model_asset_for_model_type_tags",
     "TagUsage",
     "UploadResult",
     "UserMetadata",
