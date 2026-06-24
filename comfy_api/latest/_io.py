@@ -1261,15 +1261,15 @@ class DynamicSlot(ComfyTypeI):
             out_dict[input_type][finalized_id] = value
             out_dict["dynamic_paths"][finalized_id] = finalize_prefix(curr_prefix, curr_prefix[-1])
 
-@comfytype(io_type="COMFY_LIST_V3")
-class List(ComfyTypeI):
+@comfytype(io_type="COMFY_DYNAMICGROUP_V3")
+class DynamicGroup(ComfyTypeI):
     """A repeatable group of widget inputs (e.g. lora_name + strength stacked into N rows).
 
     At execution time the node receives a ``list[dict]`` where each element is a row.
 
     Example::
 
-        io.List.Input(
+        io.DynamicGroup.Input(
             "loras",
             template=[
                 io.Combo.Input("lora_name", options=folder_paths.get_filename_list("loras")),
@@ -1299,25 +1299,25 @@ class List(ComfyTypeI):
         ):
             super().__init__(id, display_name, optional, tooltip, lazy, extra_dict)
             # Validate template entries: only WidgetInput subclasses, no nesting
-            assert len(template) > 0, "List template must have at least one field."
+            assert len(template) > 0, "DynamicGroup template must have at least one field."
             for t in template:
                 assert isinstance(t, WidgetInput), (
-                    f"List template field '{t.id}' must be a WidgetInput subclass "
+                    f"DynamicGroup template field '{t.id}' must be a WidgetInput subclass "
                     f"(Combo, Float, Int, String, Boolean, Color). Got {type(t).__name__}."
                 )
                 assert not isinstance(t, DynamicInput), (
-                    f"List template field '{t.id}' must not be a DynamicInput. "
-                    "Nesting dynamic inputs inside List is not supported."
+                    f"DynamicGroup template field '{t.id}' must not be a DynamicInput. "
+                    "Nesting dynamic inputs inside DynamicGroup is not supported."
                 )
             # Enforce unique field ids within template
             field_ids = [t.id for t in template]
             assert len(field_ids) == len(set(field_ids)), (
-                f"List template field ids must be unique within a row. Got: {field_ids}"
+                f"DynamicGroup template field ids must be unique within a row. Got: {field_ids}"
             )
-            assert min >= 0, "List min must be >= 0."
-            assert max >= 1, "List max must be >= 1."
-            assert max <= List._MaxRows, f"List max must be <= {List._MaxRows}."
-            assert min <= max, "List min must be <= max."
+            assert min >= 0, "DynamicGroup min must be >= 0."
+            assert max >= 1, "DynamicGroup max must be >= 1."
+            assert max <= DynamicGroup._MaxRows, f"DynamicGroup max must be <= {DynamicGroup._MaxRows}."
+            assert min <= max, "DynamicGroup min must be <= max."
             self.template = template
             self.min = min
             self.max = max
@@ -1346,7 +1346,7 @@ class List(ComfyTypeI):
     ):
         info = value[1]
         min_rows: int = info.get("min", 0)
-        max_rows: int = info.get("max", List._MaxRows)
+        max_rows: int = info.get("max", DynamicGroup._MaxRows)
         template: dict[str, Any] = info.get("template", {})
 
         # Collect all template field specs across required/optional sections
@@ -1374,7 +1374,7 @@ class List(ComfyTypeI):
 
         if present_rows > max_rows:
             raise ValueError(
-                f"List input '{finalized_prefix}' received {present_rows} rows but max is {max_rows}."
+                f"DynamicGroup input '{finalized_prefix}' received {present_rows} rows but max is {max_rows}."
             )
         row_count = max(min_rows, present_rows)
 
@@ -1557,8 +1557,8 @@ def setup_dynamic_input_funcs():
     register_dynamic_input_func(DynamicCombo.io_type, DynamicCombo._expand_schema_for_dynamic)
     # DynamicSlot.Input
     register_dynamic_input_func(DynamicSlot.io_type, DynamicSlot._expand_schema_for_dynamic)
-    # List.Input
-    register_dynamic_input_func(List.io_type, List._expand_schema_for_dynamic)
+    # DynamicGroup.Input
+    register_dynamic_input_func(DynamicGroup.io_type, DynamicGroup._expand_schema_for_dynamic)
 
 if len(DYNAMIC_INPUT_LOOKUP) == 0:
     setup_dynamic_input_funcs()
@@ -2006,7 +2006,7 @@ def build_nested_inputs(values: dict[str, Any], v3_data: V3Data):
 
     values.update(result)
 
-    # Post-pass: convert index-keyed dicts to sorted lists for io.List fields
+    # Post-pass: convert index-keyed dicts to sorted lists for io.DynamicGroup fields
     for list_path in list_paths:
         parts = list_path.split(".")
         # Navigate to the parent container, then convert the leaf
@@ -2599,7 +2599,7 @@ __all__ = [
     "DynamicCombo",
     "DynamicSlot",
     "Autogrow",
-    "List",
+    "DynamicGroup",
     # Other classes
     "HiddenHolder",
     "Hidden",
