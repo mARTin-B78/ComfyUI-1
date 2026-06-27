@@ -45,6 +45,8 @@ from app.frontend_management import FrontendManager, parse_version
 from comfy_api.internal import _ComfyNodeInternal
 from app.assets.seeder import asset_seeder
 from app.assets.api.routes import register_assets_routes
+from app.model_downloader.api.routes import register_routes as register_model_downloader_routes
+from app.model_downloader.manager import DOWNLOAD_MANAGER
 from app.assets.services.ingest import register_file_in_place
 from app.assets.services.asset_management import resolve_hash_to_path
 
@@ -257,6 +259,7 @@ class PromptServer():
         else:
             register_assets_routes(self.app)
             asset_seeder.disable()
+        register_model_downloader_routes(self.app)
         routes = web.RouteTableDef()
         self.routes = routes
         self.last_node_id = None
@@ -1198,6 +1201,24 @@ class PromptServer():
     async def setup(self):
         timeout = aiohttp.ClientTimeout(total=None) # no timeout
         self.client_session = aiohttp.ClientSession(timeout=timeout)
+        await self._setup_model_downloader()
+
+    async def _setup_model_downloader(self):
+        """Start the download manager: push progress over the websocket and
+        resume any downloads interrupted by a previous run."""
+        def _notify(download_id: str) -> None:
+            try:
+                view = DOWNLOAD_MANAGER.status_sync(download_id)
+                if view is not None:
+                    self.send_sync("download_progress", view)
+            except Exception:
+                logging.debug("download progress notify failed", exc_info=True)
+
+        DOWNLOAD_MANAGER.set_notify(_notify)
+        try:
+            await DOWNLOAD_MANAGER.start()
+        except Exception as e:
+            logging.warning("Failed to start model download manager: %s", e)
 
     def add_routes(self):
         self.user_manager.add_routes(self.routes)

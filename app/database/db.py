@@ -21,6 +21,7 @@ try:
 
     from app.database.models import Base
     import app.assets.database.models  # noqa: F401 — register models with Base.metadata
+    import app.model_downloader.database.models  # noqa: F401 — register models with Base.metadata
 
     _DB_AVAILABLE = True
 except ImportError as e:

@@ -230,6 +230,93 @@ components:
                 - base_version
                 - workflow_json
             type: object
+        DownloadEnqueueRequest:
+            description: Request body for enqueuing a server-side model download.
+            properties:
+                allow_any_extension:
+                    default: false
+                    description: Permit a non-model file extension (default only allows known model extensions).
+                    type: boolean
+                credential_id:
+                    description: Explicit per-host credential to use; otherwise auto-resolved by host. Still subject to the per-hop host match.
+                    nullable: true
+                    type: string
+                expected_sha256:
+                    description: Optional hub-provided SHA256 to verify the completed file against (fail-closed).
+                    nullable: true
+                    type: string
+                model_id:
+                    description: Destination as "<directory>/<filename>", resolving to a registered model folder (e.g. "loras/my_lora.safetensors").
+                    type: string
+                priority:
+                    default: 0
+                    description: Scheduling priority; higher is admitted first.
+                    type: integer
+                url:
+                    description: Source URL; must be on the allowlist (host + scheme + extension).
+                    type: string
+            required:
+                - url
+                - model_id
+            type: object
+        DownloadStatus:
+            description: Current state and live progress of a single download.
+            properties:
+                bytes_done:
+                    type: integer
+                created_at:
+                    type: integer
+                download_id:
+                    format: uuid
+                    type: string
+                error:
+                    nullable: true
+                    type: string
+                eta_seconds:
+                    nullable: true
+                    type: number
+                model_id:
+                    type: string
+                priority:
+                    type: integer
+                progress:
+                    description: Fraction in [0,1]; null until total size is known.
+                    nullable: true
+                    type: number
+                segments:
+                    description: Per-segment progress (segmented downloads only).
+                    items:
+                        properties:
+                            bytes_done:
+                                type: integer
+                            idx:
+                                type: integer
+                            length:
+                                type: integer
+                        type: object
+                    nullable: true
+                    type: array
+                speed_bps:
+                    nullable: true
+                    type: number
+                status:
+                    enum:
+                        - queued
+                        - active
+                        - paused
+                        - verifying
+                        - completed
+                        - failed
+                        - cancelled
+                    type: string
+                total_bytes:
+                    nullable: true
+                    type: integer
+                updated_at:
+                    type: integer
+                url:
+                    type: string
+            type: object
         ErrorResponse:
             description: Standard error response with a machine-readable code and human-readable message.
             properties:
@@ -510,6 +597,78 @@ components:
                     type: array
             required:
                 - history
+            type: object
+        HostCredentialUpsert:
+            description: Request body for upserting a per-host credential. The secret is write-only.
+            properties:
+                auth_scheme:
+                    default: bearer
+                    description: How the secret is attached to requests.
+                    enum:
+                        - bearer
+                        - header
+                        - query
+                    type: string
+                enabled:
+                    default: true
+                    type: boolean
+                header_name:
+                    description: Header name when auth_scheme=header (defaults to Authorization).
+                    nullable: true
+                    type: string
+                host:
+                    description: Normalized hostname the key applies to (e.g. "civitai.com").
+                    type: string
+                label:
+                    description: User-friendly name for display.
+                    nullable: true
+                    type: string
+                match_subdomains:
+                    default: false
+                    description: Also match label-boundary subdomains of host (off by default; unsafe for hub CDNs).
+                    type: boolean
+                query_param:
+                    description: Query parameter name when auth_scheme=query.
+                    nullable: true
+                    type: string
+                secret:
+                    description: The API key. Write-only — never returned by any endpoint.
+                    type: string
+            required:
+                - host
+                - secret
+            type: object
+        HostCredentialView:
+            description: Masked, API-safe view of a stored credential. Never includes the secret.
+            properties:
+                auth_scheme:
+                    type: string
+                created_at:
+                    type: integer
+                enabled:
+                    type: boolean
+                header_name:
+                    nullable: true
+                    type: string
+                host:
+                    type: string
+                id:
+                    format: uuid
+                    type: string
+                label:
+                    nullable: true
+                    type: string
+                match_subdomains:
+                    type: boolean
+                query_param:
+                    nullable: true
+                    type: string
+                secret_last4:
+                    description: Last 4 characters of the secret, for masked display only.
+                    nullable: true
+                    type: string
+                updated_at:
+                    type: integer
             type: object
         JobCancelResponse:
             description: Response for POST /api/jobs/{job_id}/cancel. Returned on both fresh cancels and idempotent no-ops.
@@ -2350,6 +2509,330 @@ paths:
             summary: Get tag histogram for filtered assets
             tags:
                 - file
+    /api/download:
+        get:
+            description: List all known downloads (queued, active, paused, and terminal) with live progress.
+            operationId: listDownloads
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    downloads:
+                                        items:
+                                            $ref: '#/components/schemas/DownloadStatus'
+                                        type: array
+                                type: object
+                    description: List of downloads
+            summary: List downloads
+            tags:
+                - download
+    /api/download/availability:
+        post:
+            description: |
+                Bulk per-id availability for a set of model_ids declared in a workflow.
+                Returns whether each model is available on disk, currently downloading
+                (with progress), or missing, plus whether its URL is on the allowlist.
+            operationId: getModelsAvailability
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                models:
+                                    additionalProperties:
+                                        type: string
+                                    description: Map of "<directory>/<filename>" model_id to its declared source URL.
+                                    type: object
+                            type: object
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    models:
+                                        additionalProperties: true
+                                        type: object
+                                type: object
+                    description: Per-id availability map
+            summary: Bulk model availability + status
+            tags:
+                - download
+    /api/download/credentials:
+        get:
+            description: List stored per-host credentials. Secrets are never returned; only masked metadata (last 4 chars, scheme, label).
+            operationId: listDownloadCredentials
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    credentials:
+                                        items:
+                                            $ref: '#/components/schemas/HostCredentialView'
+                                        type: array
+                                type: object
+                    description: Masked credential list
+            summary: List host credentials (masked)
+            tags:
+                - download
+        post:
+            description: |
+                Upsert (by host) a per-host API key used to authenticate downloads.
+                The secret is write-only: it is stored once here and never returned by any endpoint.
+            operationId: upsertDownloadCredential
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/HostCredentialUpsert'
+            responses:
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/HostCredentialView'
+                    description: Credential stored (masked view returned)
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid credential
+            summary: Upsert a host credential
+            tags:
+                - download
+    /api/download/credentials/{id}:
+        delete:
+            description: Delete a stored host credential.
+            operationId: deleteDownloadCredential
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    deleted:
+                                        type: boolean
+                                type: object
+                    description: Deleted
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: No such credential
+            summary: Delete a host credential
+            tags:
+                - download
+        get:
+            description: Get a single host credential (masked; never includes the secret).
+            operationId: getDownloadCredential
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/HostCredentialView'
+                    description: Masked credential
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: No such credential
+            summary: Get a host credential (masked)
+            tags:
+                - download
+    /api/download/enqueue:
+        post:
+            description: |
+                Enqueue a server-side model download. The URL must be on the allowlist
+                (host + scheme + extension) and the model_id must be "<directory>/<filename>"
+                resolving to a registered model folder. Returns immediately; track progress
+                via GET /api/download/{id} or the "download_progress" websocket event.
+            operationId: enqueueDownload
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DownloadEnqueueRequest'
+            responses:
+                "202":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    accepted:
+                                        type: boolean
+                                    download_id:
+                                        format: uuid
+                                        type: string
+                                type: object
+                    description: Download accepted and queued
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request (bad URL, model_id, or not allowlisted)
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Already on disk or already downloading
+            summary: Enqueue a model download
+            tags:
+                - download
+    /api/download/{id}:
+        get:
+            description: Get the current status + progress of a single download.
+            operationId: getDownloadStatus
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DownloadStatus'
+                    description: Download status
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: No such download
+            summary: Get download status
+            tags:
+                - download
+    /api/download/{id}/cancel:
+        post:
+            description: Cancel a download. The partial file is removed.
+            operationId: cancelDownload
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    ok:
+                                        type: boolean
+                                type: object
+                    description: Cancelled
+            summary: Cancel a download
+            tags:
+                - download
+    /api/download/{id}/pause:
+        post:
+            description: Pause a download. The partial file and per-segment offsets are retained for resume.
+            operationId: pauseDownload
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    ok:
+                                        type: boolean
+                                type: object
+                    description: Paused
+            summary: Pause a download
+            tags:
+                - download
+    /api/download/{id}/priority:
+        post:
+            description: Set a download's scheduling priority. Higher priority is admitted first when a slot frees.
+            operationId: setDownloadPriority
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                priority:
+                                    type: integer
+                            required:
+                                - priority
+                            type: object
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    ok:
+                                        type: boolean
+                                type: object
+                    description: Priority updated
+            summary: Set download priority
+            tags:
+                - download
+    /api/download/{id}/resume:
+        post:
+            description: Resume a paused (or failed) download from its persisted offsets.
+            operationId: resumeDownload
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    ok:
+                                        type: boolean
+                                type: object
+                    description: Resumed
+            summary: Resume a download
+            tags:
+                - download
     /api/embeddings:
         get:
             description: Returns the list of text-encoder embeddings available on disk.
