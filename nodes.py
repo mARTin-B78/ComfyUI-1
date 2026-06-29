@@ -326,7 +326,7 @@ class VAEDecodeTiled:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "decode"
 
-    CATEGORY = "experimental"
+    CATEGORY = "model/latent"
 
     def decode(self, vae, samples, tile_size, overlap=64, temporal_size=64, temporal_overlap=8):
         if tile_size < overlap * 4:
@@ -373,7 +373,7 @@ class VAEEncodeTiled:
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "encode"
 
-    CATEGORY = "experimental"
+    CATEGORY = "model/latent"
 
     def encode(self, vae, pixels, tile_size, overlap, temporal_size=64, temporal_overlap=8):
         t = vae.encode_tiled(pixels, tile_x=tile_size, tile_y=tile_size, overlap=overlap, tile_t=temporal_size, overlap_t=temporal_overlap)
@@ -2164,7 +2164,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageSharpen": "Sharpen Image",
     "ImageScaleToTotalPixels": "Scale Image to Total Pixels",
     "GetImageSize": "Get Image Size",
-    # experimental
     "VAEDecodeTiled": "VAE Decode (Tiled)",
     "VAEEncodeTiled": "VAE Encode (Tiled)",
 }
