@@ -1,6 +1,6 @@
 """Manual, validated redirect-following request opener.
 
-Automatic redirects are disabled (PRD section 9.2): we follow hops ourselves
+Automatic redirects are disabled. We follow hops ourselves
 so that on *every* hop we (a) re-validate scheme + reject credentials-in-URL,
 (b) recompute which stored credential — if any — applies to that hop's host,
 and (c) let the connector's resolver screen the IP. This is the single place

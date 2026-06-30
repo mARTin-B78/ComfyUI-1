@@ -1,4 +1,4 @@
-"""Pre-download probe (PRD section 5.1).
+"""Pre-download probe.
 
 Issues a tiny ranged GET (``Range: bytes=0-0``) — which doubles as a
 range-support test — to discover ``Content-Length``, ``Accept-Ranges``,

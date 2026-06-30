@@ -1,4 +1,4 @@
-"""Segment planning (PRD section 5.2).
+"""Segment planning.
 
 Split a known byte range into S roughly-equal segments, each fetched by its
 own coroutine with ``Range: bytes=start-end``. Falls back to a single segment
