@@ -1,4 +1,4 @@
-"""The credential store: one API key per host (PRD section 9.4).
+"""The credential store: one API key per host.
 
 Secrets are write-only over the API — :class:`CredentialView` carries only
 masked metadata (``secret_last4`` + scheme + label), never the secret itself.
@@ -23,7 +23,7 @@ from app.model_downloader.database.models import HostCredential
 
 
 def normalize_host(host: str) -> str:
-    """Lowercase, strip port, IDNA-encode (PRD section 9.4.3)."""
+    """Lowercase, strip port, IDNA-encode."""
     if not host:
         return ""
     host = host.strip().lower()
