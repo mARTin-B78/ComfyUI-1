@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from app.model_downloader.constants import (
     AUTH_SCHEME_BEARER,
@@ -35,9 +35,11 @@ class RequestAuth:
         if not self.query:
             return url
         parts = urlsplit(url)
-        params = dict(parse_qsl(parts.query, keep_blank_values=True))
-        params.update(self.query)
-        return urlunsplit(parts._replace(query=urlencode(params)))
+        # Append only the credential params, leaving the original query string
+        # (including any repeated keys and existing encoding) untouched.
+        creds = urlencode(self.query)
+        query = f"{parts.query}&{creds}" if parts.query else creds
+        return urlunsplit(parts._replace(query=query))
 
 
 def _matches(cred: HostCredential, hop_host: str) -> bool:
