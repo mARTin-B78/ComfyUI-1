@@ -240,6 +240,25 @@ class DownloadJob:
             row = queries.get_download(self.spec.download_id)
             resume_from = row.bytes_done if row else 0
             end = (pr.total_bytes - 1) if pr.total_bytes else -1
+            # ``row.bytes_done`` may be the SUM of per-segment offsets from a
+            # prior segmented run (a preallocated, non-contiguous .part). A
+            # single-stream resume writes a contiguous prefix, so the offset is
+            # only trustworthy when the on-disk file is exactly that many
+            # contiguous bytes. This guards the case where a download that ran
+            # segmented now resolves to one segment (server dropped
+            # Accept-Ranges, or --download-segments was lowered between runs):
+            # resuming over non-contiguous data would corrupt the output.
+            if resume_from > 0 and not self._contiguous_prefix_valid(resume_from):
+                logging.info(
+                    "[model_downloader] %s discarding untrusted resume offset "
+                    "%d (on-disk .part not a contiguous prefix); restarting",
+                    self.spec.model_id, resume_from,
+                )
+                resume_from = 0
+                self._remove_temp()
+                if queries.list_segments(self.spec.download_id):
+                    queries.replace_segments(self.spec.download_id, [])
+                queries.update_download(self.spec.download_id, bytes_done=0)
             self.state.segments = [SegmentRuntime(0, 0, end, resume_from)]
         self._recompute_bytes_done()
         return pr
@@ -416,6 +435,20 @@ class DownloadJob:
             except Exception:
                 logging.debug("[model_downloader] writer close error", exc_info=True)
             self._writer = None
+
+    def _contiguous_prefix_valid(self, prefix_len: int) -> bool:
+        """True when the temp file is exactly ``prefix_len`` contiguous bytes.
+
+        Single-stream resume appends sequentially, so a valid resume point
+        implies the .part size equals the persisted offset. A larger file (e.g.
+        one preallocated to ``total_bytes`` by a previous segmented run) or a
+        missing/short file means the persisted offset is not a trustworthy
+        contiguous prefix and must not be resumed over.
+        """
+        try:
+            return os.path.getsize(self.spec.temp_path) == prefix_len
+        except OSError:
+            return False
 
     def _remove_temp(self) -> None:
         try:
