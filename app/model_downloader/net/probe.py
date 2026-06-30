@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -86,5 +87,6 @@ async def probe(url: str, *, credential_id: Optional[str] = None) -> ProbeResult
                 last_modified=headers.get("Last-Modified"),
             )
     except Exception as e:  # network / SSRF / timeout
-        logging.debug("[model_downloader] probe failed for %s: %s", url, e)
-        return ProbeResult(ok=False, status=0, error=f"{type(e).__name__}: {e}")
+        host = urlparse(url).netloc or "<unknown>"
+        logging.debug("[model_downloader] probe failed for %s: %s", host, type(e).__name__)
+        return ProbeResult(ok=False, status=0, error="probe failed: network error")
