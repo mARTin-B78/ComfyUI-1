@@ -64,6 +64,13 @@ def is_blocked_ip(ip_str: str) -> bool:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return True  # unparseable -> refuse
+    # On CPython before the gh-113171 fix (backported to 3.12.4/3.11.9/
+    # 3.10.14/3.9.19) the is_* properties don't see through IPv4-mapped IPv6
+    # (e.g. ::ffff:169.254.169.254), so resolve and re-check the embedded IPv4
+    # to keep mapped metadata/private addresses from slipping past the filter.
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
     return (
         ip.is_private
         or ip.is_loopback

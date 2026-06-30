@@ -56,6 +56,12 @@ def test_allow_any_extension_relaxes_extension_only():
         ("172.16.0.1", True),
         ("::1", True),
         ("0.0.0.0", True),
+        # IPv4-mapped IPv6: must see through the mapping even on CPython
+        # versions predating the gh-113171 is_* property fix.
+        ("::ffff:169.254.169.254", True),  # mapped cloud metadata
+        ("::ffff:127.0.0.1", True),  # mapped loopback
+        ("::ffff:10.0.0.1", True),  # mapped RFC1918
+        ("::ffff:8.8.8.8", False),  # mapped public address stays allowed
         ("8.8.8.8", False),
         ("1.1.1.1", False),
         ("not-an-ip", True),  # unparseable -> refuse
