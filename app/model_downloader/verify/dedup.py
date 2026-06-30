@@ -1,4 +1,4 @@
-"""Dedup + catalog handoff — reuse the assets system (PRD section 8.5).
+"""Dedup + catalog handoff — reuse the assets system.
 
 We do NOT build a parallel indexer. "Do I already have it?" is answered by
 ``resolve_existing`` (path) at enqueue time and, where a hash is known, by the

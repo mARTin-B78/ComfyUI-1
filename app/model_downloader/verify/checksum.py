@@ -1,4 +1,4 @@
-"""Hub-checksum verification = SHA256 (PRD section 8.1).
+"""Hub-checksum verification = SHA256.
 
 Only used to confirm a download matches a *provided* ``expected_sha256``. It
 is NOT the dedup key (that is blake3, owned by the assets system). The full
