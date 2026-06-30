@@ -3,7 +3,7 @@
 A single session reuses TLS handshakes and TCP connections across the probe
 and the many segment GETs to the same host (HuggingFace is the dominant
 case), which is a large speedup on cold connections and exactly the
-connection-reuse strategy that lets us match aria2c (PRD section 5.2).
+connection-reuse strategy that lets us match aria2c.
 
 The connector uses :class:`ValidatingResolver` so every connection — initial
 or post-redirect — is screened for private/special-use IPs at connect time.

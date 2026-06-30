@@ -1,4 +1,4 @@
-"""Path resolution + traversal safety for downloads (PRD section 9.3).
+"""Path resolution + traversal safety for downloads.
 
 A ``model_id`` is a *relative destination path* of the form
 ``<directory>/<filename>`` (e.g. ``loras/my_lora.safetensors``). This module

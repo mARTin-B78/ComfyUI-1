@@ -1,4 +1,4 @@
-"""URL allowlist for server-side model fetches (PRD section 9.1).
+"""URL allowlist for server-side model fetches.
 
 Default-deny. A URL is downloadable only when its parsed host + scheme are
 allowlisted AND (unless explicitly relaxed) its final filename ends in a
@@ -56,8 +56,8 @@ def _allowed_hosts() -> dict[str, set[str]]:
 def is_host_allowed(host: str | None, scheme: str | None) -> bool:
     """True iff ``host`` is allowlisted for ``scheme``.
 
-    Used both for the initial URL and re-checked on every redirect hop
-    (PRD section 9.2), so a whitelisted URL cannot 30x into an off-list host.
+    Used both for the initial URL and re-checked on every redirect hop, 
+    so a whitelisted URL cannot 30x into an off-list host.
     """
     if not host or not scheme:
         return False

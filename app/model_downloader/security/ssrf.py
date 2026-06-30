@@ -1,4 +1,4 @@
-"""SSRF / exfiltration defenses (PRD section 9.2).
+"""SSRF / exfiltration defenses.
 
 Two cooperating layers:
 
