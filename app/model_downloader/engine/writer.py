@@ -1,4 +1,4 @@
-"""Positioned, off-loop file writes (PRD section 4 + 5.2).
+"""Positioned, off-loop file writes.
 
 Network I/O stays on the event loop; every blocking disk op (preallocate,
 positioned write, fsync) is run in a bounded thread pool via
@@ -51,10 +51,27 @@ class FileWriter:
             _EXECUTOR, os.ftruncate, self._fd, size
         )
 
+    def _pwrite_all(self, data: bytes, offset: int) -> None:
+        """``os.pwrite`` may write fewer bytes than requested (signal
+        interruption, near-ENOSPC); loop until every byte lands so we never
+        leave a gap while the caller advances by the full chunk length."""
+        assert self._fd is not None, "writer not opened"
+        view = memoryview(data)
+        written = 0
+        total = len(view)
+        while written < total:
+            n = os.pwrite(self._fd, view[written:], offset + written)
+            if n == 0:
+                raise OSError(
+                    f"os.pwrite wrote 0 bytes at offset {offset + written} "
+                    f"({written}/{total} bytes written)"
+                )
+            written += n
+
     async def write_at(self, offset: int, data: bytes) -> None:
         assert self._fd is not None, "writer not opened"
         await asyncio.get_running_loop().run_in_executor(
-            _EXECUTOR, os.pwrite, self._fd, data, offset
+            _EXECUTOR, self._pwrite_all, data, offset
         )
 
     async def flush(self) -> None:
