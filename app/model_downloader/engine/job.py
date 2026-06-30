@@ -422,24 +422,54 @@ class DownloadJob:
         self._set_status(DownloadStatus.VERIFYING)
 
         total = self.state.total_bytes
-        actual_size = os.path.getsize(self.spec.temp_path)
-        if total is not None and actual_size != total:
+        segmented = len(self.state.segments) > 1
+        if segmented:
+            # The .part was preallocated to total_bytes, so its on-disk size is
+            # not evidence of completeness: a segment that ends short (truncated
+            # 206 / server closes mid-range) leaves a zero-filled hole while the
+            # file size still equals total. Verify each segment wrote its full
+            # planned range, and trust the byte counter (== sum of segments)
+            # rather than os.path.getsize for the total check.
+            for seg in self.state.segments:
+                if seg.bytes_done != seg.length:
+                    raise FatalError(
+                        f"segment {seg.idx} incomplete: wrote {seg.bytes_done} "
+                        f"of {seg.length} bytes"
+                    )
+            observed = self.state.bytes_done
+        else:
+            # Single-stream writes a contiguous prefix, so the on-disk size is
+            # an independent witness of how much actually landed.
+            observed = os.path.getsize(self.spec.temp_path)
+        if total is not None and observed != total:
             raise FatalError(
-                f"size mismatch: wrote {actual_size} of {total} bytes"
+                f"size mismatch: wrote {observed} of {total} bytes"
             )
 
         # Structural gate (cheap, no full read) then optional sha256 (full read).
-        await asyncio.to_thread(structural.validate, self.spec.temp_path)
-        if self.spec.expected_sha256:
+        # Both failures are non-retryable (a truncated/corrupt or mismatched file
+        # will not heal on retry), so surface them as FatalError rather than
+        # letting the plain Exceptions fall through to the retryable handler.
+        # ``temp_path`` carries the ``.part`` suffix; pass ``dest_path`` so the
+        # structural check detects the real file format instead of skipping it.
+        try:
             await asyncio.to_thread(
-                checksum.verify_sha256, self.spec.temp_path, self.spec.expected_sha256
+                structural.validate, self.spec.temp_path, self.spec.dest_path
             )
+            if self.spec.expected_sha256:
+                await asyncio.to_thread(
+                    checksum.verify_sha256,
+                    self.spec.temp_path,
+                    self.spec.expected_sha256,
+                )
+        except (structural.StructuralError, checksum.ChecksumError) as e:
+            raise FatalError(str(e)) from e
 
         os.makedirs(os.path.dirname(self.spec.dest_path), exist_ok=True)
         os.replace(self.spec.temp_path, self.spec.dest_path)
         logging.info(
             "[model_downloader] completed %s (%d bytes)",
-            self.spec.model_id, actual_size,
+            self.spec.model_id, observed,
         )
         # Catalog into the assets system (blake3 dedup identity). Best-effort.
         await dedup.register_completed(self.spec.dest_path)

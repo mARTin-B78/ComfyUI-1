@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import struct
+from typing import Optional
 
 _SAFETENSORS_EXTS = (".safetensors", ".sft")
 # A sane upper bound so a corrupt header length can't make us read gigabytes.
@@ -22,9 +23,15 @@ class StructuralError(Exception):
     """The file failed its structural integrity check."""
 
 
-def validate(path: str) -> None:
-    """Validate the file at ``path``. Raises :class:`StructuralError` on failure."""
-    lower = path.lower()
+def validate(path: str, name_hint: Optional[str] = None) -> None:
+    """Validate the file at ``path``. Raises :class:`StructuralError` on failure.
+
+    The file format is detected from ``name_hint`` when provided, otherwise from
+    ``path``. Callers that download into a temp file with an opaque suffix (e.g.
+    ``*.comfy-download.part``) must pass the final destination name as
+    ``name_hint`` so the format check is not silently skipped.
+    """
+    lower = (name_hint or path).lower()
     if lower.endswith(_SAFETENSORS_EXTS):
         _validate_safetensors(path)
     # No structural check for other formats; the size + (optional) checksum
