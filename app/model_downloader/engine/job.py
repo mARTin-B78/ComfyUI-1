@@ -461,12 +461,12 @@ class DownloadJob:
             )
 
     def _set_status(self, status: str, error: Optional[str] = None) -> None:
+        # ``error`` is authoritative: passing None clears any prior failure
+        # text so transitions out of a failure state (retry/success) don't
+        # leave stale messages on RuntimeState or in the persisted row.
         self.state.status = status
-        if error is not None:
-            self.state.error = error
-        fields = {"status": status, "bytes_done": self.state.bytes_done}
-        if error is not None:
-            fields["error"] = error
+        self.state.error = error
+        fields = {"status": status, "bytes_done": self.state.bytes_done, "error": error}
         if status == DownloadStatus.QUEUED:
             fields["attempts"] = self.spec.attempts + 1
             self.spec.attempts += 1
