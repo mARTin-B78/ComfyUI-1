@@ -79,6 +79,15 @@ def test_check_redirect_hop_rejects_bad_scheme_and_userinfo():
     assert check_redirect_hop("https://cdn-lfs.huggingface.co/abc") is not None
 
 
+def test_check_redirect_hop_http_only_for_loopback():
+    # Plain http to an external host is rejected (no plaintext downgrade).
+    with pytest.raises(SSRFError):
+        check_redirect_hop("http://cdn-lfs.huggingface.co/abc")
+    # http is still honored for loopback/approved dev hosts.
+    assert check_redirect_hop("http://localhost/x.safetensors") is not None
+    assert check_redirect_hop("http://127.0.0.1/x.safetensors") is not None
+
+
 # ----- path safety -----
 
 

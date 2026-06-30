@@ -30,13 +30,27 @@ from aiohttp.resolver import DefaultResolver
 
 from app.model_downloader.security.allowlist import LOOPBACK_HOSTS
 
-# Cap the redirect chain length and the schemes a hop may use.
+# Cap the redirect chain length a hop may use.
 MAX_REDIRECTS = 5
-ALLOWED_SCHEMES = ("https", "http")
 
 
 class SSRFError(Exception):
     """A hop failed an SSRF / allowlist check."""
+
+
+def is_scheme_allowed(scheme: str | None, host: str | None) -> bool:
+    """True iff ``scheme`` is permitted for ``host`` on a download hop.
+
+    https is always allowed; plain http only for loopback/approved dev hosts.
+    """
+    if not scheme:
+        return False
+    scheme = scheme.lower()
+    if scheme == "https":
+        return True
+    if scheme == "http":
+        return bool(host) and host.lower() in LOOPBACK_HOSTS
+    return False
 
 
 def is_blocked_ip(ip_str: str) -> bool:
@@ -92,20 +106,24 @@ def check_redirect_hop(url: str) -> str:
     """Validate one redirect hop's URL.
 
     Returns the URL unchanged on success; raises :class:`SSRFError` otherwise.
-    Enforces an allowed scheme and forbids credentials-in-URL. The host is NOT
-    re-checked against the allowlist (CDN redirect targets are off-list by
-    design); private-IP protection is provided by the connector's resolver,
-    and credential leakage is prevented by exact host matching at attach time.
-    The landing filename's extension is gated separately by the caller.
+    Requires https for external hosts (http only for loopback/approved dev
+    hosts) and forbids credentials-in-URL. The host is NOT re-checked against
+    the allowlist (CDN redirect targets are off-list by design); private-IP
+    protection is provided by the connector's resolver, and credential leakage
+    is prevented by exact host matching at attach time. The landing filename's
+    extension is gated separately by the caller.
     """
     try:
         parsed = urlparse(url)
     except ValueError as e:
         raise SSRFError(f"unparseable redirect URL {url!r}: {e}") from e
-    if parsed.scheme.lower() not in ALLOWED_SCHEMES:
-        raise SSRFError(f"redirect to disallowed scheme {parsed.scheme!r}")
-    if parsed.username or parsed.password:
-        raise SSRFError("credentials-in-URL are not allowed")
     if not parsed.hostname:
         raise SSRFError(f"redirect URL has no host: {url!r}")
+    if not is_scheme_allowed(parsed.scheme, parsed.hostname):
+        raise SSRFError(
+            f"redirect to disallowed scheme {parsed.scheme!r} for host "
+            f"{parsed.hostname!r} (https required for external hosts)"
+        )
+    if parsed.username or parsed.password:
+        raise SSRFError("credentials-in-URL are not allowed")
     return url
