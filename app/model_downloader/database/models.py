@@ -1,15 +1,13 @@
 """SQLAlchemy models for the download manager.
 
-Three tables (PRD section 7):
+Three tables:
 
 - ``downloads``         one row per requested file (job + queue state).
 - ``download_segments`` per-segment byte progress, for segmented resume.
 - ``host_credentials``  one API key per host, reused across downloads.
 
-The local file catalog / dedup index is NOT here — that is owned by the
-assets system (``assets`` / ``asset_references``). On completion a finished
-file is registered into the assets catalog; ``downloads`` is kept only as
-job history.
+On completion a finished file is registered into the assets catalog; 
+``downloads`` is kept only as job history.
 """
 
 from __future__ import annotations
