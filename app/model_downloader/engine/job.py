@@ -1,4 +1,4 @@
-"""The per-download worker (PRD sections 5, 6, 8, 12).
+"""The per-download worker.
 
 One :class:`DownloadJob` drives a single file from probe to verified, cataloged
 completion. It supports cooperative pause / resume / cancel, segmented
@@ -23,7 +23,6 @@ from comfy.cli_args import args
 from app.model_downloader.constants import DownloadStatus
 from app.model_downloader.database import queries
 from app.model_downloader.engine.planner import (
-    SegmentPlan,
     effective_segment_count,
     plan_segments,
 )
