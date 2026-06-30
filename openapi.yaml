@@ -5586,3 +5586,5 @@ tags:
       name: queue
     - description: Job lifecycle queries
       name: job
+    - description: Model download management
+      name: download
