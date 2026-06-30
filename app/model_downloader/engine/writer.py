@@ -43,6 +43,14 @@ class FileWriter:
             _EXECUTOR, os.ftruncate, self._fd, size
         )
 
+    async def truncate(self, size: int = 0) -> None:
+        """Truncate the file to ``size`` bytes (default: empty it)."""
+        if self._fd is None:
+            return
+        await asyncio.get_running_loop().run_in_executor(
+            _EXECUTOR, os.ftruncate, self._fd, size
+        )
+
     async def write_at(self, offset: int, data: bytes) -> None:
         assert self._fd is not None, "writer not opened"
         await asyncio.get_running_loop().run_in_executor(

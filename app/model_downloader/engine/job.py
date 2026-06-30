@@ -361,9 +361,13 @@ class DownloadJob:
             "GET", self.spec.url, credential_id=self.spec.credential_id, headers=headers
         ) as (resp, _final):
             if offset > 0 and resp.status == 200:
-                # Resume not honoured -> start over from the beginning.
+                # Resume not honoured -> start over from the beginning. Truncate
+                # the existing partial so stale trailing bytes from the prior
+                # attempt cannot survive past the new (possibly shorter) end.
                 offset = 0
                 seg.bytes_done = 0
+                self.state.bytes_done = 0
+                await self._writer.truncate(0)
             elif offset > 0 and resp.status != 206:
                 self._raise_for_status(resp.status)
             elif offset == 0 and resp.status != 200:
