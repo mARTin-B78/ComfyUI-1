@@ -1210,7 +1210,12 @@ class PromptServer():
             try:
                 view = DOWNLOAD_MANAGER.status_sync(download_id)
                 if view is not None:
-                    self.send_sync("download_progress", view)
+                    # Drop the url field before broadcasting: the redacted URL
+                    # (scheme + host + path) should not leak to every connected
+                    # websocket client. download_id / model_id are sufficient to
+                    # correlate progress on the frontend.
+                    broadcast = {k: v for k, v in view.items() if k != "url"}
+                    self.send_sync("download_progress", broadcast)
             except Exception:
                 logging.debug("download progress notify failed", exc_info=True)
 
