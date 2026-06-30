@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlsplit
 
 from app.model_downloader.constants import (
     AUTH_SCHEME_BEARER,
@@ -26,7 +27,10 @@ def normalize_host(host: str) -> str:
     """Lowercase, strip port, IDNA-encode."""
     if not host:
         return ""
-    host = host.strip().lower()
+    host = host.strip()
+    if "://" in host:  # a full URL was pasted — extract just the host
+        host = urlsplit(host).hostname or ""
+    host = host.lower()
     if host.startswith("[") and "]" in host:  # bracketed IPv6 literal
         host = host[1 : host.index("]")]
     elif host.count(":") == 1:  # host:port (not IPv6)
