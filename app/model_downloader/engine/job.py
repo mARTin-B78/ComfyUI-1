@@ -27,7 +27,7 @@ from app.model_downloader.engine.planner import (
     plan_segments,
 )
 from app.model_downloader.engine.writer import FileWriter
-from app.model_downloader.net.http import open_validated
+from app.model_downloader.net.http import open_validated, redact_url
 from app.model_downloader.net.probe import probe
 from app.model_downloader.verify import checksum, dedup, structural
 
@@ -192,7 +192,7 @@ class DownloadJob:
         if not pr.ok:
             if pr.gated:
                 raise FatalError(
-                    f"{self.spec.url} requires authentication. Add an API key for "
+                    f"{redact_url(self.spec.url)} requires authentication. Add an API key for "
                     f"this host at /api/download/credentials and retry."
                 )
             if pr.status == 0 or pr.status in _RETRYABLE_STATUSES:
@@ -413,7 +413,7 @@ class DownloadJob:
     def _raise_for_status(self, status: int) -> None:
         if status in (401, 403):
             raise FatalError(
-                f"{self.spec.url} returned {status}; add/update an API key for "
+                f"{redact_url(self.spec.url)} returned {status}; add/update an API key for "
                 f"this host at /api/download/credentials."
             )
         if status in _RETRYABLE_STATUSES:
