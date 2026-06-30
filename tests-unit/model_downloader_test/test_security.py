@@ -89,9 +89,33 @@ def test_check_redirect_hop_http_only_for_loopback():
     # Plain http to an external host is rejected (no plaintext downgrade).
     with pytest.raises(SSRFError):
         check_redirect_hop("http://cdn-lfs.huggingface.co/abc")
-    # http is still honored for loopback/approved dev hosts.
-    assert check_redirect_hop("http://localhost/x.safetensors") is not None
-    assert check_redirect_hop("http://127.0.0.1/x.safetensors") is not None
+    # http is honored for loopback only on the initial user-supplied URL (the
+    # "download a local model" feature).
+    assert (
+        check_redirect_hop("http://localhost/x.safetensors", is_initial_url=True)
+        is not None
+    )
+    assert (
+        check_redirect_hop("http://127.0.0.1/x.safetensors", is_initial_url=True)
+        is not None
+    )
+
+
+def test_check_redirect_hop_blocks_loopback_and_ip_literals_on_redirect():
+    # A redirect (is_initial_url=False, the default) must never reach loopback,
+    # whether by hostname or by IP literal, nor any other internal IP literal.
+    for target in (
+        "http://localhost/x.safetensors",
+        "http://127.0.0.1/x.safetensors",
+        "https://[::1]/x.safetensors",
+        "https://169.254.169.254/x.safetensors",  # cloud metadata
+        "https://10.0.0.5/x.safetensors",  # RFC1918
+    ):
+        with pytest.raises(SSRFError):
+            check_redirect_hop(target)
+    # Off-allowlist public CDN hosts (hostnames) remain valid redirect targets;
+    # their resolved IPs are screened by the connector's resolver.
+    assert check_redirect_hop("https://cdn-lfs.huggingface.co/abc") is not None
 
 
 # ----- path safety -----

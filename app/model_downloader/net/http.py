@@ -53,7 +53,7 @@ async def _resolve_final_response(
     current = url
     hops = 0
     while True:
-        check_redirect_hop(current)
+        check_redirect_hop(current, is_initial_url=(hops == 0))
         parts = urlsplit(current)
         auth = await resolve_auth_for_hop(
             parts.hostname or "", parts.scheme, explicit_credential_id=credential_id
