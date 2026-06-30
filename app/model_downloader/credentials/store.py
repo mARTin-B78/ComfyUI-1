@@ -115,7 +115,7 @@ class CredentialStore:
         values = {
             "host": host,
             "secret": secret,
-            "secret_last4": secret[-4:] if len(secret) >= 4 else secret,
+            "secret_last4": secret[-4:] if len(secret) > 4 else None,
             "auth_scheme": auth_scheme,
             "header_name": header_name,
             "query_param": query_param,
