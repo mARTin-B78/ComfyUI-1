@@ -20,6 +20,7 @@ from app.logger import setup_logger
 setup_logger(log_level=args.verbose, use_stdout=args.log_stdout)
 
 from app.assets.seeder import asset_seeder
+from app.assets.api.routes import disable_assets_routes
 from app.assets.services import register_output_files
 import itertools
 import utils.extra_config
@@ -459,6 +460,12 @@ def setup_database():
             init_db()
             if asset_seeder.start(roots=("models", "input", "output"), prune_first=True, compute_hashes=args.enable_asset_hashing):
                 logging.info("Background asset scan initiated for models, input, output")
+        else:
+            # Optional DB dependencies are missing, so init_db() is skipped and the
+            # asset backend has no database. Disable assets so /api/assets/* returns
+            # a clean 503 instead of 500s against an uninitialized DB.
+            disable_assets_routes()
+            asset_seeder.disable()
     except Exception as e:
         if "database is locked" in str(e):
             logging.error(
@@ -467,6 +474,10 @@ def setup_database():
                 "  --database-url sqlite:///path/to/another.db"
             )
             sys.exit(1)
+        # The database is unusable. Fail safe by disabling assets so endpoints
+        # return 503 (service unavailable) rather than 500s on every request.
+        disable_assets_routes()
+        asset_seeder.disable()
         logging.error(f"Failed to initialize database. Please ensure you have installed the latest requirements. If the error persists, please report this as in future the database will be required: {e}")
 
 

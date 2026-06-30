@@ -102,6 +102,15 @@ def disable_assets_routes() -> None:
     _ASSETS_ENABLED = False
 
 
+def assets_enabled() -> bool:
+    """Return whether the asset routes are currently serving requests.
+
+    Reflects live backend availability: False once disable_assets_routes() has
+    been called (e.g. after a database init failure or missing dependencies).
+    """
+    return _ASSETS_ENABLED
+
+
 def _build_error_response(
     status: int, code: str, message: str, details: dict | None = None
 ) -> web.Response:
