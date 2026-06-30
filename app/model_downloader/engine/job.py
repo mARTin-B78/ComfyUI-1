@@ -222,12 +222,34 @@ class DownloadJob:
             pr.total_bytes, pr.accept_ranges, max(1, args.download_segments)
         )
         existing = await asyncio.to_thread(queries.list_segments, self.spec.download_id)
-        if (
+        can_resume_segmented = (
             seg_count > 1
             and existing
             and pr.total_bytes is not None
             and existing[-1].end_offset == pr.total_bytes - 1
-        ):
+        )
+        if can_resume_segmented and not self._segmented_part_valid(pr.total_bytes):
+            # The persisted per-segment offsets describe bytes in a preallocated
+            # .part that is now gone or the wrong size (e.g. the partial of a
+            # failed download was swept on restart, or removed by a fatal
+            # error). Trusting them would skip already-"complete" segments and
+            # leave zero-filled holes. Discard the offsets and re-plan fresh.
+            logging.info(
+                "[model_downloader] %s discarding segmented resume offsets "
+                "(preallocated .part missing or wrong size); restarting",
+                self.spec.model_id,
+            )
+            self._remove_temp()
+            await asyncio.to_thread(
+                queries.replace_segments, self.spec.download_id, []
+            )
+            await asyncio.to_thread(
+                queries.update_download, self.spec.download_id, bytes_done=0
+            )
+            existing = []
+            can_resume_segmented = False
+
+        if can_resume_segmented:
             # Resume an existing segmented plan.
             self.state.segments = [
                 SegmentRuntime(s.idx, s.start_offset, s.end_offset, s.bytes_done)
@@ -536,6 +558,23 @@ class DownloadJob:
             except Exception:
                 logging.debug("[model_downloader] writer close error", exc_info=True)
             self._writer = None
+
+    def _segmented_part_valid(self, total_bytes: int) -> bool:
+        """True when the temp file is the preallocated segmented ``.part``.
+
+        A segmented transfer preallocates the .part to ``total_bytes`` up front
+        and tracks how much of each range landed via per-segment offsets. Those
+        offsets are only trustworthy when the file they describe is still on
+        disk at its full preallocated size. A missing file (swept after a
+        failure, removed on a fatal error, deleted by hand) or a wrong-sized one
+        means the persisted offsets no longer correspond to real bytes and must
+        not be resumed over. Doing so would skip "complete" segments and leave
+        zero-filled holes that pass the size-only verification gate.
+        """
+        try:
+            return os.path.getsize(self.spec.temp_path) == total_bytes
+        except OSError:
+            return False
 
     def _contiguous_prefix_valid(self, prefix_len: int) -> bool:
         """True when the temp file is exactly ``prefix_len`` contiguous bytes.

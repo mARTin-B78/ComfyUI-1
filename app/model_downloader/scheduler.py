@@ -1,4 +1,4 @@
-"""Priority scheduler + lifecycle (PRD sections 4, 6, 12).
+"""Priority scheduler + lifecycle.
 
 Owns the set of running jobs and admits queued downloads up to a global
 concurrency limit (K), highest priority first, FIFO within a priority. Runs
@@ -25,7 +25,7 @@ from app.model_downloader.database import queries
 from app.model_downloader.engine.job import DownloadJob, JobSpec
 from app.model_downloader.security import paths
 
-# Backoff for retryable failures (PRD section 12).
+# Backoff for retryable failures
 _BACKOFF_BASE = 2.0
 _BACKOFF_CAP = 300.0
 _MAX_ATTEMPTS = 6
@@ -70,13 +70,23 @@ class Scheduler:
     def _sweep_orphan_temp_files() -> None:
         """Remove ``.part`` files not referenced by a resumable download row.
 
-        Resumable partials (queued/paused rows) are preserved; only truly
-        orphaned temp files from crashed runs are deleted.
+        Resumable partials are preserved; only truly orphaned temp files from
+        crashed runs are deleted. ``FAILED`` is included because
+        :meth:`DownloadManager.resume` explicitly permits resuming a
+        retry-exhausted failed row: deleting its partial here while the
+        per-segment offsets survive in the DB would make the next resume
+        preallocate a fresh sparse file, skip every "complete" segment, and
+        leave zero-filled holes that pass the size-only verification gate.
         """
         live = {
             row.temp_path
             for row in queries.list_downloads()
-            if row.status in (DownloadStatus.QUEUED, DownloadStatus.PAUSED)
+            if row.status
+            in (
+                DownloadStatus.QUEUED,
+                DownloadStatus.PAUSED,
+                DownloadStatus.FAILED,
+            )
         }
         for path in paths.iter_all_tmp_paths():
             if path in live:
