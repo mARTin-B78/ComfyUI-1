@@ -2,11 +2,8 @@
 Download manager schema.
 
 Adds the three tables that back the server-side model download manager
-(PRD section 7): transient job/queue state (``downloads`` + per-segment
+: transient job/queue state (``downloads`` + per-segment
 ``download_segments``) and one-API-key-per-host auth (``host_credentials``).
-
-The local file catalog / dedup index is intentionally NOT added here — it
-is owned by the assets system (``assets`` / ``asset_references``).
 
 Revision ID: 0005_download_manager
 Revises: 0004_drop_tag_type
