@@ -199,6 +199,13 @@ class DownloadJob:
                 raise RetryableError(pr.error or "probe failed")
             raise FatalError(pr.error or f"probe returned HTTP {pr.status}")
 
+        max_bytes = self._max_download_bytes()
+        if max_bytes is not None and pr.total_bytes is not None and pr.total_bytes > max_bytes:
+            raise FatalError(
+                f"file size {pr.total_bytes} exceeds the maximum allowed "
+                f"download size {max_bytes} (--download-max-bytes)"
+            )
+
         self._etag = pr.etag or self._etag
         self.state.total_bytes = pr.total_bytes
         queries.update_download(
@@ -318,11 +325,29 @@ class DownloadJob:
                 self._raise_for_status(resp.status)
             async for chunk in resp.content.iter_chunked(args.download_chunk_size):
                 self._check_control()
+                # Never write past this segment's planned range: a
+                # non-conforming 206 that returns more than the requested
+                # bytes would otherwise overrun adjacent segments and the
+                # preallocated file. Cap the write and abort on overflow.
+                remaining = seg.length - seg.bytes_done
+                if remaining <= 0:
+                    raise FatalError(
+                        f"segment {seg.idx}: server returned more than the "
+                        f"requested {seg.length} bytes"
+                    )
+                overflow = len(chunk) > remaining
+                if overflow:
+                    chunk = chunk[:remaining]
                 await self._writer.write_at(offset, chunk)
                 offset += len(chunk)
                 seg.bytes_done += len(chunk)
                 self._recompute_bytes_done()
                 await self._persist_progress()
+                if overflow:
+                    raise FatalError(
+                        f"segment {seg.idx}: server returned more than the "
+                        f"requested {seg.length} bytes"
+                    )
 
     async def _run_single(self) -> None:
         seg = self.state.segments[0]
@@ -343,13 +368,37 @@ class DownloadJob:
                 self._raise_for_status(resp.status)
             elif offset == 0 and resp.status != 200:
                 self._raise_for_status(resp.status)
+            # Byte ceiling for this stream: the known total when the server
+            # reported a size, otherwise the configured maximum download size.
+            # Without a bound, a non-conforming response or an unknown-length
+            # stream (end == -1) that never closes could fill the disk (DoS).
+            limit = (seg.end + 1) if seg.end >= 0 else self._max_download_bytes()
             async for chunk in resp.content.iter_chunked(args.download_chunk_size):
                 self._check_control()
+                overflow = False
+                if limit is not None:
+                    remaining = limit - offset
+                    if remaining <= 0:
+                        raise FatalError(
+                            f"download exceeded the maximum size {limit} bytes"
+                        )
+                    if len(chunk) > remaining:
+                        chunk = chunk[:remaining]
+                        overflow = True
                 await self._writer.write_at(offset, chunk)
                 offset += len(chunk)
                 seg.bytes_done = offset
                 self.state.bytes_done = offset
                 await self._persist_progress()
+                if overflow:
+                    raise FatalError(
+                        f"download exceeded the maximum size {limit} bytes"
+                    )
+
+    def _max_download_bytes(self) -> Optional[int]:
+        """Configured maximum download size in bytes, or ``None`` if disabled."""
+        cap = getattr(args, "download_max_bytes", 0)
+        return cap if cap and cap > 0 else None
 
     def _raise_for_status(self, status: int) -> None:
         if status in (401, 403):

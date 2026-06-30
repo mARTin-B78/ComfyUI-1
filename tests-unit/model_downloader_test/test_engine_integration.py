@@ -76,6 +76,50 @@ def _slow_handler(payload: bytes, chunk: int = 16384, delay: float = 0.01):
     return handler
 
 
+def _overflow_range_handler(payload: bytes, extra: int = 256 * 1024):
+    """A non-conforming 206 server that returns MORE than the requested range."""
+
+    async def handler(request: web.Request) -> web.Response:
+        rng = request.headers.get("Range")
+        if rng:
+            spec = rng.split("=", 1)[1]
+            s, _, e = spec.partition("-")
+            start = int(s)
+            end = int(e) if e else len(payload) - 1
+            # Maliciously overrun: append extra bytes past the requested end.
+            body = payload[start : end + 1] + bytes(extra)
+            return web.Response(
+                status=206,
+                body=body,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{len(payload)}",
+                    "Accept-Ranges": "bytes",
+                    "ETag": PAYLOAD_ETAG,
+                },
+            )
+        return web.Response(
+            status=200, body=payload, headers={"Accept-Ranges": "bytes", "ETag": PAYLOAD_ETAG}
+        )
+
+    return handler
+
+
+def _unbounded_handler(total: int, chunk: int = 16384):
+    """A 200 stream with no Content-Length / Accept-Ranges (unknown length)."""
+
+    async def handler(request: web.Request) -> web.StreamResponse:
+        resp = web.StreamResponse(status=200)
+        await resp.prepare(request)
+        sent = 0
+        while sent < total:
+            await resp.write(bytes(min(chunk, total - sent)))
+            sent += chunk
+        await resp.write_eof()
+        return resp
+
+    return handler
+
+
 async def _serve(handler):
     app = web.Application()
     app.router.add_route("*", "/{name:.*}", handler)
@@ -219,6 +263,85 @@ def test_cancel_rollback(model_root, monkeypatch):
             assert status == DownloadStatus.CANCELLED
             assert not os.path.exists(temp)
             assert not os.path.exists(final_path)
+        finally:
+            await runner.cleanup()
+            await close_session()
+
+    asyncio.run(_run())
+
+
+# ----- size-bound enforcement (malicious / non-conforming hosts) -----
+
+
+def test_segment_overflow_aborts(model_root):
+    """A 206 returning more than the requested range must not overrun."""
+    payload = _payload(4 * 1024 * 1024)  # large enough to segment
+
+    async def _run():
+        await close_session()
+        runner, port = await _serve(_overflow_range_handler(payload))
+        try:
+            url = f"http://127.0.0.1:{port}/model.safetensors"
+            did, final_path, temp = _insert("loras/overflow.safetensors", url)
+            job = DownloadJob(JobSpec(
+                download_id=did, url=url, model_id="loras/overflow.safetensors",
+                dest_path=final_path, temp_path=temp,
+            ))
+            status = await job.run()
+            assert status == DownloadStatus.FAILED
+            assert not os.path.exists(final_path)
+            assert not os.path.exists(temp)
+        finally:
+            await runner.cleanup()
+            await close_session()
+
+    asyncio.run(_run())
+
+
+def test_rejects_oversized_known_download(model_root, monkeypatch):
+    """A file whose advertised size exceeds the cap is rejected at probe."""
+    monkeypatch.setattr(args, "download_max_bytes", 100_000, raising=False)
+    payload = _payload(300_000)
+
+    async def _run():
+        await close_session()
+        runner, port = await _serve(_noranges_handler(payload))
+        try:
+            url = f"http://127.0.0.1:{port}/model.safetensors"
+            did, final_path, temp = _insert("loras/toobig.safetensors", url)
+            job = DownloadJob(JobSpec(
+                download_id=did, url=url, model_id="loras/toobig.safetensors",
+                dest_path=final_path, temp_path=temp,
+            ))
+            status = await job.run()
+            assert status == DownloadStatus.FAILED
+            assert not os.path.exists(final_path)
+        finally:
+            await runner.cleanup()
+            await close_session()
+
+    asyncio.run(_run())
+
+
+def test_unknown_length_capped_by_max_bytes(model_root, monkeypatch):
+    """An unbounded unknown-length stream is capped by --download-max-bytes."""
+    monkeypatch.setattr(args, "download_max_bytes", 100_000, raising=False)
+    monkeypatch.setattr(args, "download_chunk_size", 16384, raising=False)
+
+    async def _run():
+        await close_session()
+        runner, port = await _serve(_unbounded_handler(2 * 1024 * 1024))
+        try:
+            url = f"http://127.0.0.1:{port}/model.safetensors"
+            did, final_path, temp = _insert("loras/unbounded.safetensors", url)
+            job = DownloadJob(JobSpec(
+                download_id=did, url=url, model_id="loras/unbounded.safetensors",
+                dest_path=final_path, temp_path=temp,
+            ))
+            status = await job.run()
+            assert status == DownloadStatus.FAILED
+            assert not os.path.exists(final_path)
+            assert not os.path.exists(temp)
         finally:
             await runner.cleanup()
             await close_session()
