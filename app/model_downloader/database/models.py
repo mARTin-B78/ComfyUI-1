@@ -65,7 +65,12 @@ class Download(Base):
     expected_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Explicit credential override; otherwise auto-resolved by host.
-    credential_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # RESTRICT keeps a credential from being deleted while a download references it.
+    credential_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("host_credentials.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     allow_any_extension: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
@@ -84,6 +89,10 @@ class Download(Base):
         cascade="all,delete-orphan",
         passive_deletes=True,
         order_by="DownloadSegment.idx",
+    )
+
+    credential: Mapped[HostCredential | None] = relationship(
+        "HostCredential", back_populates="downloads"
     )
 
     __table_args__ = (
@@ -150,6 +159,10 @@ class HostCredential(Base):
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False, default=_now)
     updated_at: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=_now, onupdate=_now
+    )
+
+    downloads: Mapped[list[Download]] = relationship(
+        "Download", back_populates="credential"
     )
 
     __table_args__ = (
