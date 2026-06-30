@@ -1,4 +1,4 @@
-"""Public facade for the download manager (PRD section 10).
+"""Public facade for the download manager.
 
 This is the only object the server imports. It validates requests, owns the
 :class:`Scheduler`, and exposes a small async API plus read models for status.

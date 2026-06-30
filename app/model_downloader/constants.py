@@ -1,7 +1,7 @@
 """Shared constants for the download manager.
 
 Status values are persisted as TEXT in the ``downloads`` table; keep them
-stable. The lifecycle is (PRD section 6):
+stable. The lifecycle is:
 
     queued -> active -> verifying -> completed
        |        |-> paused -> (resume) -> active
@@ -11,7 +11,7 @@ stable. The lifecycle is (PRD section 6):
 
 from __future__ import annotations
 
-# Auth schemes for HostCredential (PRD section 9.4.1).
+# Auth schemes for HostCredential
 AUTH_SCHEME_BEARER = "bearer"
 AUTH_SCHEME_HEADER = "header"
 AUTH_SCHEME_QUERY = "query"
