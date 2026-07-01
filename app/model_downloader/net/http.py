@@ -10,9 +10,10 @@ that attaches credentials, so a token can never ride a redirect to a CDN host.
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 import aiohttp
 
@@ -35,6 +36,43 @@ def redact_url(url: str) -> str:
     except ValueError:
         return "<unparseable-url>"
     return urlunsplit(parts._replace(query=""))
+
+
+_CD_FILENAME_STAR = re.compile(
+    r"filename\*\s*=\s*[^']*'[^']*'([^;]+)", re.IGNORECASE
+)
+_CD_FILENAME_QUOTED = re.compile(r'filename\s*=\s*"([^"]+)"', re.IGNORECASE)
+_CD_FILENAME_BARE = re.compile(r"filename\s*=\s*([^;]+)", re.IGNORECASE)
+
+
+def filename_from_content_disposition(value: Optional[str]) -> Optional[str]:
+    """Extract the download filename from a ``Content-Disposition`` header.
+
+    Prefers the RFC 5987 ``filename*=`` form (percent-decoded) over the plain
+    ``filename=`` form. Any directory components in the value are stripped so a
+    hostile header can only influence the *name*, never the target directory.
+    Returns ``None`` when no filename is present.
+    """
+    if not value:
+        return None
+    for pat, decode in (
+        (_CD_FILENAME_STAR, True),
+        (_CD_FILENAME_QUOTED, False),
+        (_CD_FILENAME_BARE, False),
+    ):
+        m = pat.search(value)
+        if not m:
+            continue
+        raw = m.group(1).strip().strip('"')
+        if decode:
+            try:
+                raw = unquote(raw)
+            except Exception:
+                pass
+        name = raw.replace("\\", "/").rsplit("/", 1)[-1].strip()
+        if name:
+            return name
+    return None
 
 
 async def _resolve_final_response(

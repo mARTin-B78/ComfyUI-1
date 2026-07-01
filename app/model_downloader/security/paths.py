@@ -58,6 +58,28 @@ def parse_model_id(model_id: str, allow_any_extension: bool = False) -> tuple[st
     return directory, filename
 
 
+def apply_extension(model_id: str, ext: str) -> str:
+    """Return ``model_id`` with its filename forced to end in ``ext``.
+
+    ``ext`` includes the leading dot (e.g. ``".safetensors"``). If the filename
+    already ends in a *known model extension* it is replaced; otherwise ``ext``
+    is appended (so ``loras/mymodel`` -> ``loras/mymodel.safetensors`` and
+    ``loras/mymodel.ckpt`` -> ``loras/mymodel.safetensors``). A filename with a
+    non-model suffix (``my.model.v2``) is treated as an extensionless stem and
+    ``ext`` is appended. The directory part is left untouched; validation is
+    still the caller's job via :func:`parse_model_id`.
+    """
+    directory, sep, filename = model_id.partition("/")
+    if not sep:
+        return model_id  # malformed; parse_model_id will reject it
+    low = filename.lower()
+    for known in ALLOWED_MODEL_EXTENSIONS:
+        if low.endswith(known):
+            filename = filename[: -len(known)]
+            break
+    return f"{directory}{sep}{filename}{ext}"
+
+
 def resolve_existing(model_id: str, allow_any_extension: bool = False) -> Optional[str]:
     """Return the absolute path of an installed model, or None if missing.
 

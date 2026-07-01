@@ -14,10 +14,17 @@ from typing import Callable, Optional
 
 from app.model_downloader.constants import DownloadStatus
 from app.model_downloader.database import queries
+from app.model_downloader.net.probe import probe
 from app.model_downloader.scheduler import SCHEDULER
 from app.model_downloader.security import paths
 from app.model_downloader.net.http import redact_url
-from app.model_downloader.security.allowlist import is_url_allowed
+from app.model_downloader.security.allowlist import (
+    ALLOWED_MODEL_EXTENSIONS,
+    filename_extension,
+    is_host_allowed_url,
+    is_url_downloadable,
+    url_path_extension,
+)
 from app.model_downloader.security.paths import InvalidModelId
 
 # Non-terminal statuses: an existing row in one of these blocks a re-enqueue.
@@ -70,11 +77,30 @@ class DownloadManager:
         allow_any_extension: bool = False,
         credential_id: Optional[str] = None,
     ) -> str:
-        if not is_url_allowed(url, allow_any_extension):
+        # Coarse gate first: host/scheme must be allowlisted, and any extension
+        # present in the URL path must be a known model type. A URL whose path
+        # carries NO extension (e.g. Civitai's ``/api/download/models/<id>``) is
+        # admitted here and its real extension is resolved from the network
+        # below before the download is finally accepted.
+        if allow_any_extension:
+            if not is_host_allowed_url(url):
+                raise DownloadError(
+                    "URL_NOT_ALLOWED",
+                    "URL is not on the download allowlist (host/scheme).",
+                )
+        elif not is_url_downloadable(url):
             raise DownloadError(
                 "URL_NOT_ALLOWED",
                 "URL is not on the download allowlist (host/scheme/extension).",
             )
+
+        # When the URL path has no extension, follow it to where it resolves and
+        # adopt the real extension from the response, forcing the stored
+        # filename to match. Skipped when the caller opted into any extension.
+        if not allow_any_extension and url_path_extension(url) == "":
+            resolved_ext = await self._resolve_extension(url, credential_id)
+            model_id = paths.apply_extension(model_id, resolved_ext)
+
         try:
             paths.parse_model_id(model_id, allow_any_extension)
             dest_path, temp_path = paths.resolve_destination(model_id, allow_any_extension)
@@ -118,6 +144,40 @@ class DownloadManager:
         logging.info("[model_downloader] enqueued %s -> %s", redact_url(url), model_id)
         await self._scheduler.pump()
         return download_id
+
+    async def _resolve_extension(
+        self, url: str, credential_id: Optional[str]
+    ) -> str:
+        """Follow ``url`` to its final response and return the real extension.
+
+        Used for allowlisted URLs whose path has no extension (e.g. Civitai
+        download endpoints): the filename lives in the ``Content-Disposition``
+        header or the post-redirect URL. Raises :class:`DownloadError` when the
+        URL can't be resolved, needs credentials, or resolves to something that
+        is not a known model file — so we never persist a bogus destination.
+        """
+        pr = await probe(url, credential_id=credential_id)
+        if not pr.ok:
+            if pr.gated:
+                raise DownloadError(
+                    "CREDENTIALS_REQUIRED",
+                    f"{redact_url(url)} requires authentication to resolve. Add an "
+                    f"API key for this host at /api/download/credentials and retry.",
+                    status=401,
+                )
+            raise DownloadError(
+                "URL_RESOLVE_FAILED",
+                f"Could not resolve {redact_url(url)}: {pr.error or 'unknown error'}",
+                status=502,
+            )
+        ext = filename_extension(pr.filename) if pr.filename else ""
+        if ext not in ALLOWED_MODEL_EXTENSIONS:
+            raise DownloadError(
+                "URL_NOT_ALLOWED",
+                f"URL resolves to {pr.filename or '<unknown>'!r}, which is not a "
+                f"known model file type {ALLOWED_MODEL_EXTENSIONS}.",
+            )
+        return ext
 
     def _model_lock(self, model_id: str) -> asyncio.Lock:
         # Lazily create one lock per model_id. There is no ``await`` between the
@@ -362,22 +422,25 @@ class DownloadManager:
             if r.status in _LIVE_STATUSES or r.model_id not in by_model:
                 by_model[r.model_id] = r
 
+        # ``url_allowed`` mirrors the coarse enqueue gate (host/scheme + a
+        # non-disallowed extension); URLs whose extension is only known after a
+        # network resolve — e.g. Civitai download endpoints — report allowed.
         out: dict[str, dict] = {}
         for model_id, url in models.items():
             try:
                 exists = await asyncio.to_thread(paths.resolve_existing, model_id)
             except InvalidModelId:
-                out[model_id] = {"state": "missing", "url_allowed": is_url_allowed(url)}
+                out[model_id] = {"state": "missing", "url_allowed": is_url_downloadable(url)}
                 continue
             if exists:
-                out[model_id] = {"state": "available", "url_allowed": is_url_allowed(url)}
+                out[model_id] = {"state": "available", "url_allowed": is_url_downloadable(url)}
                 continue
             row = by_model.get(model_id)
             if row is not None and row.status in _LIVE_STATUSES:
                 view = self._view(row)
                 out[model_id] = {
                     "state": "downloading",
-                    "url_allowed": is_url_allowed(url),
+                    "url_allowed": is_url_downloadable(url),
                     "download_id": view["download_id"],
                     "progress": view["progress"],
                     "bytes_done": view["bytes_done"],
@@ -385,7 +448,7 @@ class DownloadManager:
                     "speed_bps": view["speed_bps"],
                 }
             else:
-                out[model_id] = {"state": "missing", "url_allowed": is_url_allowed(url)}
+                out[model_id] = {"state": "missing", "url_allowed": is_url_downloadable(url)}
         return out
 
 

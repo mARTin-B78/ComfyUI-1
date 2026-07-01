@@ -12,11 +12,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 import aiohttp
 
-from app.model_downloader.net.http import open_validated
+from app.model_downloader.net.http import (
+    filename_from_content_disposition,
+    open_validated,
+)
 from app.model_downloader.net.session import parse_int_header
 
 _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=60, sock_connect=30, sock_read=30)
@@ -33,6 +36,11 @@ class ProbeResult:
     last_modified: Optional[str] = None
     gated: bool = False  # 401/403 — needs (or has wrong) credentials
     error: Optional[str] = None
+    # Filename the server intends this response to be saved as: the
+    # ``Content-Disposition`` name if present, else the post-redirect URL's
+    # basename. Used to resolve the real extension for URLs (e.g. Civitai's
+    # ``/api/download`` endpoints) that carry no extension in their path.
+    filename: Optional[str] = None
 
 
 def _total_from_content_range(value: Optional[str]) -> Optional[int]:
@@ -41,6 +49,19 @@ def _total_from_content_range(value: Optional[str]) -> Optional[int]:
         return None
     total = value.rsplit("/", 1)[1].strip()
     return parse_int_header(total)
+
+
+def _filename_from_response(
+    content_disposition: Optional[str], final_url: Optional[str]
+) -> Optional[str]:
+    name = filename_from_content_disposition(content_disposition)
+    if name:
+        return name
+    if final_url:
+        base = urlsplit(final_url).path.rsplit("/", 1)[-1]
+        if base:
+            return base
+    return None
 
 
 async def probe(url: str, *, credential_id: Optional[str] = None) -> ProbeResult:
@@ -85,6 +106,9 @@ async def probe(url: str, *, credential_id: Optional[str] = None) -> ProbeResult
                 accept_ranges=accept_ranges,
                 etag=headers.get("ETag"),
                 last_modified=headers.get("Last-Modified"),
+                filename=_filename_from_response(
+                    headers.get("Content-Disposition"), final_url
+                ),
             )
     except Exception as e:  # network / SSRF / timeout
         host = urlparse(url).netloc or "<unknown>"

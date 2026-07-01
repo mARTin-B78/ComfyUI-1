@@ -83,6 +83,37 @@ def _range_handler(payload: bytes):
     return handler
 
 
+def _content_disposition_handler(payload: bytes, filename: str):
+    """A range-capable server that only reveals its filename via a header.
+
+    Models a Civitai-style ``/api/download/...`` endpoint: the URL path has no
+    extension, and the real filename (hence extension) lives in the response
+    ``Content-Disposition`` header.
+    """
+
+    async def handler(request: web.Request) -> web.Response:
+        headers = {
+            "Accept-Ranges": "bytes",
+            "ETag": PAYLOAD_ETAG,
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        }
+        rng = request.headers.get("Range")
+        if rng:
+            spec = rng.split("=", 1)[1]
+            s, _, e = spec.partition("-")
+            start = int(s)
+            end = int(e) if e else len(payload) - 1
+            chunk = payload[start : end + 1]
+            return web.Response(
+                status=206,
+                body=chunk,
+                headers={**headers, "Content-Range": f"bytes {start}-{end}/{len(payload)}"},
+            )
+        return web.Response(status=200, body=payload, headers=headers)
+
+    return handler
+
+
 def _noranges_handler(payload: bytes):
     async def handler(request: web.Request) -> web.Response:
         # Always full body, never advertises Accept-Ranges -> single-stream.
@@ -515,5 +546,92 @@ def test_manager_rejects_disallowed_url(model_root):
                 "https://evil.example.com/x.safetensors", "loras/bad.safetensors"
             )
         assert ei.value.code == "URL_NOT_ALLOWED"
+
+    asyncio.run(_run())
+
+
+def test_manager_resolves_extensionless_url(model_root):
+    """An allowlisted URL with no extension in its path is resolved from the
+    response, and the stored file adopts the resolved extension."""
+    payload = _safetensors_payload(1 * 1024 * 1024)
+
+    async def _run():
+        await close_session()
+        from app.model_downloader.manager import DOWNLOAD_MANAGER
+
+        runner, port = await _serve(
+            _content_disposition_handler(payload, "RealModel.safetensors")
+        )
+        try:
+            # No extension in the path (Civitai-style) and none in the model_id.
+            url = f"http://127.0.0.1:{port}/api/download/models/12345"
+            did = await DOWNLOAD_MANAGER.enqueue(url, "loras/my_civitai_model")
+
+            row = queries.get_download(did)
+            # The resolved extension was appended to the model_id + destination.
+            assert row.model_id == "loras/my_civitai_model.safetensors"
+            assert row.dest_path.endswith("my_civitai_model.safetensors")
+
+            final_path, _ = paths.resolve_destination(
+                "loras/my_civitai_model.safetensors"
+            )
+            for _ in range(500):
+                await asyncio.sleep(0.02)
+                row = queries.get_download(did)
+                if row.status in DownloadStatus.TERMINAL:
+                    break
+            row = queries.get_download(did)
+            assert row.status == DownloadStatus.COMPLETED, row.error
+            assert open(final_path, "rb").read() == payload
+        finally:
+            await runner.cleanup()
+            await close_session()
+
+    asyncio.run(_run())
+
+
+def test_manager_overrides_extension_from_resolution(model_root):
+    """A model_id carrying a different known extension is corrected to match
+    the resolved URL's extension."""
+    payload = _safetensors_payload(256 * 1024)
+
+    async def _run():
+        await close_session()
+        from app.model_downloader.manager import DOWNLOAD_MANAGER
+
+        runner, port = await _serve(
+            _content_disposition_handler(payload, "weights.safetensors")
+        )
+        try:
+            url = f"http://127.0.0.1:{port}/api/download/models/777"
+            # Caller guessed .ckpt; resolution says .safetensors -> corrected.
+            did = await DOWNLOAD_MANAGER.enqueue(url, "loras/guessed.ckpt")
+            row = queries.get_download(did)
+            assert row.model_id == "loras/guessed.safetensors"
+        finally:
+            await runner.cleanup()
+            await close_session()
+
+    asyncio.run(_run())
+
+
+def test_manager_rejects_non_model_resolution(model_root):
+    """A URL that resolves to a non-model file is rejected, not downloaded."""
+
+    async def _run():
+        await close_session()
+        from app.model_downloader.manager import DOWNLOAD_MANAGER, DownloadError
+
+        runner, port = await _serve(
+            _content_disposition_handler(b"not a model", "installer.zip")
+        )
+        try:
+            url = f"http://127.0.0.1:{port}/api/download/models/999"
+            with pytest.raises(DownloadError) as ei:
+                await DOWNLOAD_MANAGER.enqueue(url, "loras/whatever")
+            assert ei.value.code == "URL_NOT_ALLOWED"
+        finally:
+            await runner.cleanup()
+            await close_session()
 
     asyncio.run(_run())

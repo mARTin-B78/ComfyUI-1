@@ -43,6 +43,42 @@ def test_allow_any_extension_relaxes_extension_only():
     assert allowlist.is_url_allowed(odd, allow_any_extension=True) is True
 
 
+@pytest.mark.parametrize(
+    "url,downloadable",
+    [
+        # known model extension in the path -> allowed
+        ("https://civitai.com/x/model.safetensors", True),
+        # no extension in the path (Civitai download API) -> allowed, resolved later
+        ("https://civitai.com/api/download/models/3031464?fileId=2910346", True),
+        ("https://civitai.com/api/download/models/3031464", True),
+        # explicit non-model extension -> rejected even on an allowed host
+        ("https://civitai.com/api/download/models/thing.zip", False),
+        ("https://huggingface.co/org/repo/resolve/main/config.json", False),
+        # off-list host is never downloadable
+        ("https://evil.example.com/api/download/models/1", False),
+        # http to a non-loopback allowlisted host is not permitted
+        ("http://civitai.com/api/download/models/1", False),
+    ],
+)
+def test_is_url_downloadable(url, downloadable):
+    assert allowlist.is_url_downloadable(url) is downloadable
+
+
+@pytest.mark.parametrize(
+    "name,ext",
+    [
+        ("model.safetensors", ".safetensors"),
+        ("model.SAFETENSORS", ".safetensors"),
+        ("archive.tar.gz", ".gz"),
+        ("noext", ""),
+        (".safetensors", ""),  # leading-dot dotfile -> no extension
+        ("a/b/c/model.ckpt", ".ckpt"),
+    ],
+)
+def test_filename_extension(name, ext):
+    assert allowlist.filename_extension(name) == ext
+
+
 # ----- SSRF: blocked IPs -----
 
 
@@ -148,3 +184,48 @@ def test_resolve_destination_stays_in_root(model_root):
     assert final_path.startswith(model_root)
     assert temp_path.startswith(model_root)
     assert temp_path != final_path
+
+
+@pytest.mark.parametrize(
+    "model_id,ext,expected",
+    [
+        # no extension -> append the resolved one
+        ("loras/my_civitai_model", ".safetensors", "loras/my_civitai_model.safetensors"),
+        # different known extension -> replace it
+        ("loras/mymodel.ckpt", ".safetensors", "loras/mymodel.safetensors"),
+        # same extension -> unchanged
+        ("loras/mymodel.safetensors", ".safetensors", "loras/mymodel.safetensors"),
+        # non-model suffix is treated as a stem, extension appended
+        ("loras/my.model.v2", ".safetensors", "loras/my.model.v2.safetensors"),
+        # malformed (no slash) is returned untouched for parse_model_id to reject
+        ("noslash", ".safetensors", "noslash"),
+    ],
+)
+def test_apply_extension(model_id, ext, expected):
+    assert paths.apply_extension(model_id, ext) == expected
+
+
+# ----- Content-Disposition filename parsing -----
+
+
+@pytest.mark.parametrize(
+    "header,expected",
+    [
+        ('attachment; filename="model.safetensors"', "model.safetensors"),
+        ("attachment; filename=model.ckpt", "model.ckpt"),
+        # RFC 5987 form is preferred and percent-decoded
+        (
+            "attachment; filename=\"fallback.bin\"; filename*=UTF-8''my%20model.safetensors",
+            "my model.safetensors",
+        ),
+        # directory components in a hostile header are stripped to the basename
+        ('attachment; filename="../../etc/passwd"', "passwd"),
+        ('attachment; filename="a\\\\b\\\\model.pt"', "model.pt"),
+        ("inline", None),
+        (None, None),
+    ],
+)
+def test_filename_from_content_disposition(header, expected):
+    from app.model_downloader.net.http import filename_from_content_disposition
+
+    assert filename_from_content_disposition(header) == expected
