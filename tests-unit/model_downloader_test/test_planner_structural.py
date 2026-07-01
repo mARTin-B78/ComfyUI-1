@@ -69,3 +69,13 @@ def test_structural_skips_unknown_extension(tmp_path):
     p = tmp_path / "weights.bin"
     p.write_bytes(b"anything")
     structural.validate(str(p))  # no structural check, no raise
+
+
+def test_structural_detects_truncation_via_name_hint(tmp_path):
+    # The downloader validates the opaque temp file (a ``.part`` path) but keys
+    # the format check off the final destination name via ``name_hint``, so
+    # truncation must still be detected instead of silently skipped.
+    p = tmp_path / "bad.comfy-download.part"
+    p.write_bytes(_make_safetensors(256, corrupt_size=True))
+    with pytest.raises(structural.StructuralError):
+        structural.validate(str(p), name_hint="model.safetensors")

@@ -8,10 +8,35 @@ session bound to its own event loop.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 
 import pytest
+
+
+def _drain_scheduler_tasks(scheduler) -> None:
+    """Cancel and await live scheduler tasks so none outlive the test.
+
+    Uses the actual task handles rather than only clearing ``_tasks``: each
+    per-test event loop is created by ``asyncio.run``, so a task left behind by
+    a crashed/aborted test would otherwise keep its coroutine alive. We cancel
+    every live task and, when its loop is still usable, run it to completion to
+    let the cancellation propagate before dropping the reference.
+    """
+    for task in list(scheduler._tasks.values()):
+        if task is None:
+            continue
+        loop = task.get_loop()
+        if task.done() or loop.is_closed():
+            continue
+        task.cancel()
+        if not loop.is_running():
+            try:
+                loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
+            except Exception:
+                pass
+    scheduler._tasks.clear()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -19,7 +44,8 @@ def _init_db():
     import app.database.db as db
     from comfy.cli_args import args
 
-    db_path = tempfile.mktemp(suffix="-dlmgr-test.sqlite3")
+    fd, db_path = tempfile.mkstemp(suffix="-dlmgr-test.sqlite3")
+    os.close(fd)
     args.database_url = f"sqlite:///{db_path}"
     db.init_db()
     yield
@@ -36,11 +62,12 @@ def _reset_runtime():
     from app.model_downloader.scheduler import SCHEDULER
 
     ns._session = None
+    _drain_scheduler_tasks(SCHEDULER)
     SCHEDULER._jobs.clear()
-    SCHEDULER._tasks.clear()
     SCHEDULER._backoff_until.clear()
     SCHEDULER._started = False
     yield
+    _drain_scheduler_tasks(SCHEDULER)
     ns._session = None
 
 

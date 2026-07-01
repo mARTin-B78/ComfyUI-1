@@ -141,6 +141,13 @@ class Scheduler:
             status = await job.run()
         except Exception as e:  # run() is defensive, but never let a task die silently
             logging.error("[model_downloader] job %s crashed: %s", download_id, e)
+            queries.update_download(
+                download_id,
+                status=DownloadStatus.FAILED,
+                error=f"internal error: {e}",
+            )
+            if self._notify_cb:
+                self._notify_cb(download_id)
         finally:
             self._tasks.pop(download_id, None)
             self._jobs.pop(download_id, None)
