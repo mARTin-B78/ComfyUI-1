@@ -27,6 +27,12 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="dl-writer")
 
 _HAS_PWRITE = hasattr(os, "pwrite")
 
+# On Windows ``os.open`` defaults to text mode, which translates every ``\n``
+# byte into ``\r\n`` on write and corrupts binary payloads (the file grows by
+# one byte per 0x0A). ``O_BINARY`` disables that translation; it does not exist
+# on POSIX, where the default is already binary.
+_O_BINARY = getattr(os, "O_BINARY", 0)
+
 
 class FileWriter:
     """Owns the ``.part`` file descriptor for one download."""
@@ -39,7 +45,7 @@ class FileWriter:
 
     def _open(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        self._fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        self._fd = os.open(self.path, os.O_RDWR | os.O_CREAT | _O_BINARY, 0o644)
 
     async def open(self) -> None:
         await asyncio.get_running_loop().run_in_executor(_EXECUTOR, self._open)
