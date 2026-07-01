@@ -464,6 +464,7 @@ def setup_database():
             # Optional DB dependencies are missing, so init_db() is skipped and the
             # asset backend has no database. Disable assets so /api/assets/* returns
             # a clean 503 instead of 500s against an uninitialized DB.
+            logging.warning("Optional database dependencies are missing; assets system disabled.")
             disable_assets_routes()
             asset_seeder.disable()
     except Exception as e:
