@@ -6,7 +6,7 @@ Three tables:
 - ``download_segments`` per-segment byte progress, for segmented resume.
 - ``host_credentials``  one API key per host, reused across downloads.
 
-On completion a finished file is registered into the assets catalog; 
+On completion a finished file is registered into the assets catalog;
 ``downloads`` is kept only as job history.
 """
 

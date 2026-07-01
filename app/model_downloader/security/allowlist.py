@@ -56,7 +56,7 @@ def _allowed_hosts() -> dict[str, set[str]]:
 def is_host_allowed(host: str | None, scheme: str | None) -> bool:
     """True iff ``host`` is allowlisted for ``scheme``.
 
-    Used both for the initial URL and re-checked on every redirect hop, 
+    Used both for the initial URL and re-checked on every redirect hop,
     so a whitelisted URL cannot 30x into an off-list host.
     """
     if not host or not scheme:
