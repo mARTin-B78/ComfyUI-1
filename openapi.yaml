@@ -2560,6 +2560,28 @@ paths:
             summary: Bulk model availability + status
             tags:
                 - download
+    /api/download/clear:
+        post:
+            description: |
+                Delete all terminal downloads (completed, failed, cancelled) from history
+                in one transaction, so the cleared history persists across reloads. Live
+                downloads (queued, active, paused, verifying) are skipped. Finished model
+                files on disk are never removed; only leftover .part temp files are cleaned up.
+            operationId: clearDownloads
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    deleted:
+                                        description: Number of history rows removed.
+                                        type: integer
+                                type: object
+                    description: History cleared
+            summary: Clear terminal downloads from history
+            tags:
+                - download
     /api/download/credentials:
         get:
             description: List stored per-host credentials. Secrets are never returned; only masked metadata (last 4 chars, scheme, label).
@@ -2701,6 +2723,45 @@ paths:
             tags:
                 - download
     /api/download/{id}:
+        delete:
+            description: |
+                Delete a single terminal download from history so it stays gone across
+                reloads. Refuses (409) to delete a live download (queued, active, paused,
+                verifying) — cancel it first. The finished model file on disk is never
+                removed; only a leftover .part temp file is cleaned up.
+            operationId: deleteDownload
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    deleted:
+                                        type: boolean
+                                type: object
+                    description: Deleted
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: No such download
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Download is still in progress
+            summary: Delete a download from history
+            tags:
+                - download
         get:
             description: Get the current status + progress of a single download.
             operationId: getDownloadStatus

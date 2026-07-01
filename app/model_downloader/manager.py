@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from typing import Callable, Optional
 
@@ -209,6 +210,64 @@ class DownloadManager:
         # Admission-order only; a higher priority is
         # picked up the next time a slot frees. Pump in case a slot is free now.
         await self._scheduler.pump()
+
+    async def delete(self, download_id: str) -> None:
+        """Delete a terminal download so it stays gone from history.
+
+        Refuses to delete a live download so a record is never removed out from
+        under a running worker; cancel it first. Any leftover ``.part`` temp
+        file (e.g. from a failed transfer) is removed, but the finished model
+        file on disk is never touched.
+        """
+        if self._scheduler.get_job(download_id) is not None:
+            raise DownloadError(
+                "DOWNLOAD_ACTIVE",
+                "Cannot delete a download that is still in progress.",
+                status=409,
+            )
+        row = await asyncio.to_thread(queries.get_download, download_id)
+        if row is None:
+            raise DownloadError("NOT_FOUND", "No such download.", status=404)
+        if row.status in _LIVE_STATUSES:
+            raise DownloadError(
+                "DOWNLOAD_ACTIVE",
+                "Cannot delete a download that is still in progress.",
+                status=409,
+            )
+
+        try:
+            os.remove(row.temp_path)
+        except OSError:
+            pass
+        await asyncio.to_thread(queries.delete_download, download_id)
+
+    async def clear(self) -> int:
+        """Delete all terminal downloads from history in one transaction.
+
+        Skips anything still live (queued/active/paused/verifying, or a running
+        job) so an in-flight download is never removed out from under a worker.
+        Finished model files on disk are never touched; only leftover ``.part``
+        temp files from failed/cancelled transfers are removed. Returns the
+        number of history rows deleted.
+        """
+
+        rows = await asyncio.to_thread(queries.list_downloads)
+        deletable = [
+            r
+            for r in rows
+            if r.status not in _LIVE_STATUSES
+            and self._scheduler.get_job(r.id) is None
+        ]
+        if not deletable:
+            return 0
+        for r in deletable:
+            try:
+                os.remove(r.temp_path)
+            except OSError:
+                pass
+        return await asyncio.to_thread(
+            queries.delete_downloads, [r.id for r in deletable]
+        )
 
     # ----- read models -----
 

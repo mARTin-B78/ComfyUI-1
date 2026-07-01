@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.db import create_session
@@ -82,6 +82,24 @@ def delete_download(download_id: str) -> None:
         if row is not None:
             session.delete(row)
             session.commit()
+
+
+def delete_downloads(download_ids: list[str]) -> int:
+    """Delete many downloads in one transaction; returns the number removed.
+
+    Uses a bulk ``DELETE ... WHERE id IN (...)``. Segment rows are removed by
+    the ``ON DELETE CASCADE`` foreign key (SQLite ``PRAGMA foreign_keys=ON`` is
+    set in ``app/database/db.py``), so this stays consistent without loading the
+    ORM relationship.
+    """
+    if not download_ids:
+        return 0
+    with create_session() as session:
+        result = session.execute(
+            delete(Download).where(Download.id.in_(download_ids))
+        )
+        session.commit()
+        return result.rowcount or 0
 
 
 def replace_segments(download_id: str, segments: list[dict]) -> None:

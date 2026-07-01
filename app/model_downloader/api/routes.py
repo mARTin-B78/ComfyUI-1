@@ -6,11 +6,13 @@ envelope used by ``app/assets/api/routes.py``:
   POST   /api/download/enqueue
   GET    /api/download
   POST   /api/download/availability
+  POST   /api/download/clear
   POST   /api/download/credentials
   GET    /api/download/credentials
   GET    /api/download/credentials/{id}
   DELETE /api/download/credentials/{id}
   GET    /api/download/{id}
+  DELETE /api/download/{id}
   POST   /api/download/{id}/pause
   POST   /api/download/{id}/resume
   POST   /api/download/{id}/cancel
@@ -107,6 +109,12 @@ async def availability(request: web.Request) -> web.Response:
     return _ok({"models": await DOWNLOAD_MANAGER.availability(parsed.models)})
 
 
+@ROUTES.post("/api/download/clear")
+async def clear(request: web.Request) -> web.Response:
+    deleted = await DOWNLOAD_MANAGER.clear()
+    return _ok({"deleted": deleted})
+
+
 # ----- credentials (secrets are write-only) — must precede /{id} -----
 
 
@@ -162,6 +170,15 @@ async def get_download(request: web.Request) -> web.Response:
     if view is None:
         return _error(404, "NOT_FOUND", "No such download.")
     return _ok(view)
+
+
+@ROUTES.delete("/api/download/{id}")
+async def delete_download(request: web.Request) -> web.Response:
+    try:
+        await DOWNLOAD_MANAGER.delete(request.match_info["id"])
+    except DownloadError as e:
+        return _from_download_error(e)
+    return _ok({"deleted": True})
 
 
 @ROUTES.post("/api/download/{id}/pause")
