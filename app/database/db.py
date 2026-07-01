@@ -4,7 +4,11 @@ import shutil
 from app.logger import log_startup_warning
 from utils.install_util import get_missing_requirements_message
 from filelock import FileLock, Timeout
-from comfy.cli_args import args
+# NOTE: import the module (not `from ... import args`) so we always read the
+# live `args` object. Tests reload `comfy.cli_args`, which replaces the module
+# global; a bound `args` reference would go stale and point at the default
+# database URL instead of the one configured for the test.
+import comfy.cli_args
 
 _DB_AVAILABLE = False
 Session = None
@@ -58,13 +62,13 @@ def get_alembic_config():
 
     config = Config(config_path)
     config.set_main_option("script_location", scripts_path)
-    config.set_main_option("sqlalchemy.url", args.database_url)
+    config.set_main_option("sqlalchemy.url", comfy.cli_args.args.database_url)
 
     return config
 
 
 def get_db_path():
-    url = args.database_url
+    url = comfy.cli_args.args.database_url
     if url.startswith("sqlite:///"):
         return url.split("///")[1]
     else:
@@ -98,7 +102,7 @@ def _is_memory_db(db_url):
 
 
 def init_db():
-    db_url = args.database_url
+    db_url = comfy.cli_args.args.database_url
     logging.debug(f"Database URL: {db_url}")
 
     if _is_memory_db(db_url):
