@@ -10,6 +10,7 @@ which is exactly what these hubs expect.
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -18,6 +19,7 @@ from app.model_downloader.constants import (
     AUTH_SCHEME_BEARER,
     AUTH_SCHEME_HEADER,
     AUTH_SCHEME_QUERY,
+    ENV_TOKEN_HOSTS,
 )
 from app.model_downloader.credentials.store import normalize_host
 from app.model_downloader.database import queries
@@ -89,6 +91,14 @@ def _resolve_sync(
     for sub in queries.list_subdomain_credentials():
         if sub.enabled and _matches(sub, hop_host):
             return _build_auth(sub)
+
+    # Env fallback: only for an exact host match, and only after the DB lookups
+    # miss, so a user-set credential always takes precedence. The token is never
+    # persisted; it is read fresh from the environment on each hop.
+    for var in ENV_TOKEN_HOSTS.get(hop_host, ()):
+        token = os.environ.get(var)
+        if token:
+            return RequestAuth(headers={"Authorization": f"Bearer {token}"})
     return None
 
 

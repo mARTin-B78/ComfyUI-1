@@ -17,6 +17,15 @@ AUTH_SCHEME_HEADER = "header"
 AUTH_SCHEME_QUERY = "query"
 AUTH_SCHEMES = (AUTH_SCHEME_BEARER, AUTH_SCHEME_HEADER, AUTH_SCHEME_QUERY)
 
+# Hosts for which a bearer token can be sourced from the environment when no
+# stored credential matches. Values are the env var names to try, in order.
+# Only consulted during auto-resolve for an exact host match over https, so the
+# same per-hop boundary rules apply (e.g. the token is dropped on a redirect to
+# a CDN host). Kept here so the host->env-var mapping lives in one place.
+ENV_TOKEN_HOSTS = {
+    "huggingface.co": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"),
+}
+
 
 class DownloadStatus:
     QUEUED = "queued"

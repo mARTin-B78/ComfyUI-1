@@ -108,3 +108,59 @@ def test_resolver_never_crosses_host_boundary():
         finally:
             await CREDENTIAL_STORE.delete(view.id)
     asyncio.run(_run())
+
+
+# ----- env-based HF token fallback -----
+
+
+def test_env_token_fallback_attaches_when_no_db_credential(monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "env_hf_token")
+
+    async def _run():
+        # exact host over https -> env token attached
+        auth = await resolver.resolve_auth_for_hop("huggingface.co", "https")
+        assert auth is not None
+        assert auth.headers["Authorization"] == "Bearer env_hf_token"
+        # non-https hop -> never attached
+        assert await resolver.resolve_auth_for_hop("huggingface.co", "http") is None
+        # CDN redirect host -> dropped (exact-host only)
+        assert await resolver.resolve_auth_for_hop("cdn-lfs.huggingface.co", "https") is None
+    asyncio.run(_run())
+
+
+def test_env_token_secondary_var_is_honored(monkeypatch):
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setenv("HUGGING_FACE_HUB_TOKEN", "env_hub_token")
+
+    async def _run():
+        auth = await resolver.resolve_auth_for_hop("huggingface.co", "https")
+        assert auth is not None
+        assert auth.headers["Authorization"] == "Bearer env_hub_token"
+    asyncio.run(_run())
+
+
+def test_db_credential_takes_precedence_over_env(monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "env_hf_token")
+
+    async def _run():
+        view = await CREDENTIAL_STORE.upsert("huggingface.co", "db_secret_key")
+        try:
+            auth = await resolver.resolve_auth_for_hop("huggingface.co", "https")
+            assert auth is not None
+            assert auth.headers["Authorization"] == "Bearer db_secret_key"
+        finally:
+            await CREDENTIAL_STORE.delete(view.id)
+    asyncio.run(_run())
+
+
+def test_env_token_does_not_leak_into_explicit_path(monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "env_hf_token")
+
+    async def _run():
+        # An explicit credential id that doesn't resolve must stay None; the env
+        # fallback only applies to the auto-resolve branch.
+        auth = await resolver.resolve_auth_for_hop(
+            "huggingface.co", "https", explicit_credential_id="does-not-exist"
+        )
+        assert auth is None
+    asyncio.run(_run())
