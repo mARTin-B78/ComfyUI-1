@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.model_downloader.constants import AUTH_SCHEME_BEARER
 
@@ -21,6 +21,11 @@ class EnqueueRequest(BaseModel):
     allow_any_extension: bool = False
     credential_id: Optional[str] = None
 
+    @field_validator("url")
+    @classmethod
+    def _strip_url(cls, v: str) -> str:
+        return v.strip()
+
 
 class PriorityRequest(BaseModel):
     priority: int
@@ -30,6 +35,11 @@ class AvailabilityRequest(BaseModel):
     """``{model_id: url}`` — the URLs declared in the workflow JSON."""
 
     models: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("models")
+    @classmethod
+    def _strip_urls(cls, v: dict[str, str]) -> dict[str, str]:
+        return {k: url.strip() for k, url in v.items()}
 
 
 class CredentialUpsertRequest(BaseModel):
