@@ -9,20 +9,23 @@ _NON_MODEL_FOLDER_NAMES = frozenset({"configs", "custom_nodes"})
 _KNOWN_SUBFOLDER_TAGS = frozenset({"3d", "pasted", "painter", "threed", "webcam"})
 
 
-def get_comfy_models_folders() -> list[tuple[str, list[str]]]:
-    """Build list of (folder_name, base_paths[]) for all model locations.
+def get_comfy_models_folders() -> list[tuple[str, list[str], set[str]]]:
+    """Build list of (folder_name, base_paths[], extensions) for all model locations.
 
     Includes every category registered in folder_names_and_paths,
     regardless of whether its paths are under the main models_dir,
     but excludes non-model entries like configs and custom_nodes.
+
+    An empty extensions set means the category accepts any extension,
+    matching folder_paths.filter_files_extensions semantics.
     """
-    targets: list[tuple[str, list[str]]] = []
+    targets: list[tuple[str, list[str], set[str]]] = []
     for name, values in folder_paths.folder_names_and_paths.items():
         if name in _NON_MODEL_FOLDER_NAMES:
             continue
-        paths, _exts = values[0], values[1]
+        paths, exts = values[0], values[1]
         if paths:
-            targets.append((name, paths))
+            targets.append((name, paths, set(exts)))
     return targets
 
 
@@ -44,7 +47,9 @@ def resolve_destination_from_tags(tags: list[str]) -> tuple[str, list[str]]:
         folder_name = model_type_tags[0].split(":", 1)[1]
         if not folder_name:
             raise ValueError("models uploads require exactly one model_type:<folder_name> tag")
-        model_folder_paths = dict(get_comfy_models_folders())
+        model_folder_paths = {
+            name: paths for name, paths, _exts in get_comfy_models_folders()
+        }
         try:
             bases = model_folder_paths[folder_name]
         except KeyError:
@@ -199,7 +204,7 @@ def get_asset_category_and_relative_path(
 
     # 4) models (check deepest matching base to avoid ambiguity)
     best: tuple[int, str, str] | None = None  # (base_len, bucket, rel_inside_bucket)
-    for bucket, bases in get_comfy_models_folders():
+    for bucket, bases, _exts in get_comfy_models_folders():
         for b in bases:
             base_abs = os.path.abspath(b)
             if not _check_is_within(fp_abs, base_abs):
@@ -225,6 +230,12 @@ def get_backend_system_tags_from_path(path: str) -> list[str]:
     The returned tags are only the backend-generated system tags: ``models``,
     ``model_type:<folder_name>``, ``input``, ``output``, and ``temp``. Model
     type tags are based on registered folder names, not path components.
+
+    A ``model_type:<folder_name>`` tag is only emitted when the file's
+    extension is accepted by that folder's registered extension set, so
+    categories sharing a base directory tag only the files they can
+    actually load. Files under a model base whose extension matches no
+    category still get the ``models`` tag.
     """
     fp_abs = os.path.abspath(path)
     fp_path = Path(fp_abs)
@@ -242,17 +253,23 @@ def get_backend_system_tags_from_path(path: str) -> list[str]:
         if fp_path.is_relative_to(os.path.abspath(base)):
             _add(role)
 
+    ext = os.path.splitext(fp_abs)[1].lower()
     model_types: list[str] = []
-    for folder_name, bases in get_comfy_models_folders():
+    under_models_base = False
+    for folder_name, bases, extensions in get_comfy_models_folders():
         for base in bases:
             if fp_path.is_relative_to(os.path.abspath(base)):
-                model_types.append(folder_name)
+                under_models_base = True
+                # Empty set accepts any extension, matching
+                # folder_paths.filter_files_extensions semantics.
+                if not extensions or ext in extensions:
+                    model_types.append(folder_name)
                 break
 
-    if model_types:
+    if under_models_base:
         _add("models")
-        for folder_name in model_types:
-            _add(f"model_type:{folder_name}")
+    for folder_name in model_types:
+        _add(f"model_type:{folder_name}")
 
     if not tags:
         raise ValueError(

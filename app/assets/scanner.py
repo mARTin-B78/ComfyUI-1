@@ -63,7 +63,7 @@ RootType = Literal["models", "input", "output"]
 def get_prefixes_for_root(root: RootType) -> list[str]:
     if root == "models":
         bases: list[str] = []
-        for _bucket, paths in get_comfy_models_folders():
+        for _bucket, paths, _exts in get_comfy_models_folders():
             bases.extend(paths)
         return [os.path.abspath(p) for p in bases]
     if root == "input":
@@ -81,7 +81,7 @@ def get_all_known_prefixes() -> list[str]:
 
 def collect_models_files() -> list[str]:
     out: list[str] = []
-    for folder_name, bases in get_comfy_models_folders():
+    for folder_name, bases, _exts in get_comfy_models_folders():
         rel_files = folder_paths.get_filename_list(folder_name) or []
         for rel_path in rel_files:
             if not all(is_visible(part) for part in Path(rel_path).parts):

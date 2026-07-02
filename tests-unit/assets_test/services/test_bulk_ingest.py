@@ -215,8 +215,8 @@ class TestBatchInsertSeedAssets:
             patch(
                 "app.assets.services.path_utils.get_comfy_models_folders",
                 return_value=[
-                    ("checkpoints", [str(shared_root)]),
-                    ("diffusion_models", [str(shared_root)]),
+                    ("checkpoints", [str(shared_root)], {".safetensors"}),
+                    ("diffusion_models", [str(shared_root)], {".safetensors"}),
                 ],
             ),
         ):
