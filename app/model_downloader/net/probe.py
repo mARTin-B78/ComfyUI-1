@@ -19,6 +19,7 @@ import aiohttp
 from app.model_downloader.net.http import (
     filename_from_content_disposition,
     open_validated,
+    redact_url,
 )
 from app.model_downloader.net.session import parse_int_header
 
@@ -36,11 +37,24 @@ class ProbeResult:
     last_modified: Optional[str] = None
     gated: bool = False  # 401/403 — needs (or has wrong) credentials
     error: Optional[str] = None
+    # HuggingFace's ``X-Error-Code`` header (e.g. ``GatedRepo``,
+    # ``RepoNotFound``) when the host reports one. Lets us tell "this repo is
+    # gated — request access" apart from "you just need a token".
+    error_code: Optional[str] = None
     # Filename the server intends this response to be saved as: the
     # ``Content-Disposition`` name if present, else the post-redirect URL's
     # basename. Used to resolve the real extension for URLs (e.g. Civitai's
     # ``/api/download`` endpoints) that carry no extension in their path.
     filename: Optional[str] = None
+
+    @property
+    def is_gated_repo(self) -> bool:
+        """True when the host says the repo is gated (access must be granted).
+
+        Distinct from a plain missing/invalid token: even a valid credential
+        won't help until the user accepts the model's terms on its page.
+        """
+        return (self.error_code or "").lower() == "gatedrepo"
 
 
 def _total_from_content_range(value: Optional[str]) -> Optional[int]:
@@ -75,9 +89,15 @@ async def probe(url: str, *, credential_id: Optional[str] = None) -> ProbeResult
             timeout=_PROBE_TIMEOUT,
         ) as (resp, final_url):
             if resp.status in (401, 403):
+                error_code = resp.headers.get("X-Error-Code")
+                error_message = resp.headers.get("X-Error-Message")
                 return ProbeResult(
                     ok=False, status=resp.status, final_url=final_url, gated=True,
-                    error=f"host returned {resp.status} (authentication required)",
+                    error_code=error_code,
+                    error=(
+                        error_message
+                        or f"host returned {resp.status} (authentication required)"
+                    ),
                 )
             if resp.status not in (200, 206):
                 return ProbeResult(
@@ -114,3 +134,24 @@ async def probe(url: str, *, credential_id: Optional[str] = None) -> ProbeResult
         host = urlparse(url).netloc or "<unknown>"
         logging.debug("[model_downloader] probe failed for %s: %s", host, type(e).__name__)
         return ProbeResult(ok=False, status=0, error="probe failed: network error")
+
+
+def gated_error_message(url: str, pr: ProbeResult) -> str:
+    """Build a user-facing message for a gated/auth-required probe result.
+
+    Distinguishes a *gated* repo (access must be requested/granted on the model
+    page — a token alone is not enough) from a plain missing/invalid credential.
+    """
+    redacted = redact_url(url)
+    if pr.is_gated_repo:
+        detail = (pr.error or "access is restricted").rstrip()
+        if detail and not detail.endswith((".", "!", "?")):
+            detail += "."
+        return (
+            f"{redacted} is a gated model — {detail} Request access on the model's "
+            f"page, add an API key for this host at /api/download/credentials, and retry."
+        )
+    return (
+        f"{redacted} requires authentication. Add an API key for this host at "
+        f"/api/download/credentials and retry."
+    )

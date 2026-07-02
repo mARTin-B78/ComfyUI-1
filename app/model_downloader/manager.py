@@ -14,7 +14,7 @@ from typing import Callable, Optional
 
 from app.model_downloader.constants import DownloadStatus
 from app.model_downloader.database import queries
-from app.model_downloader.net.probe import probe
+from app.model_downloader.net.probe import gated_error_message, probe
 from app.model_downloader.scheduler import SCHEDULER
 from app.model_downloader.security import paths
 from app.model_downloader.net.http import redact_url
@@ -160,9 +160,8 @@ class DownloadManager:
         if not pr.ok:
             if pr.gated:
                 raise DownloadError(
-                    "CREDENTIALS_REQUIRED",
-                    f"{redact_url(url)} requires authentication to resolve. Add an "
-                    f"API key for this host at /api/download/credentials and retry.",
+                    "GATED_REPO" if pr.is_gated_repo else "CREDENTIALS_REQUIRED",
+                    gated_error_message(url, pr),
                     status=401,
                 )
             raise DownloadError(

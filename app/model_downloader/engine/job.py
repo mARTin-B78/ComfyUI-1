@@ -28,7 +28,7 @@ from app.model_downloader.engine.planner import (
 )
 from app.model_downloader.engine.writer import FileWriter
 from app.model_downloader.net.http import open_validated, redact_url
-from app.model_downloader.net.probe import probe
+from app.model_downloader.net.probe import gated_error_message, probe
 from app.model_downloader.verify import checksum, dedup, structural
 
 _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
@@ -191,10 +191,7 @@ class DownloadJob:
         pr = await probe(self.spec.url, credential_id=self.spec.credential_id)
         if not pr.ok:
             if pr.gated:
-                raise FatalError(
-                    f"{redact_url(self.spec.url)} requires authentication. Add an API key for "
-                    f"this host at /api/download/credentials and retry."
-                )
+                raise FatalError(gated_error_message(self.spec.url, pr))
             if pr.status == 0 or pr.status in _RETRYABLE_STATUSES:
                 raise RetryableError(pr.error or "probe failed")
             raise FatalError(pr.error or f"probe returned HTTP {pr.status}")
