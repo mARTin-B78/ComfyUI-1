@@ -191,12 +191,8 @@ class DownloadManager:
     async def _has_live_download(
         self, model_id: str, *, exclude_id: Optional[str] = None
     ) -> bool:
-        rows = await asyncio.to_thread(queries.list_downloads)
-        return any(
-            r.model_id == model_id
-            and r.id != exclude_id
-            and r.status in _LIVE_STATUSES
-            for r in rows
+        return await asyncio.to_thread(
+            queries.has_live_download_for_model, model_id, _LIVE_STATUSES, exclude_id
         )
 
     # ----- control -----
@@ -249,8 +245,6 @@ class DownloadManager:
         if row is None:
             raise DownloadError("NOT_FOUND", "No such download.", status=404)
         if row.status in _LIVE_STATUSES:
-            import os
-
             try:
                 os.remove(row.temp_path)
             except OSError:

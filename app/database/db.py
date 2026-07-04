@@ -4,10 +4,7 @@ import shutil
 from app.logger import log_startup_warning
 from utils.install_util import get_missing_requirements_message
 from filelock import FileLock, Timeout
-# NOTE: import the module (not `from ... import args`) so we always read the
-# live `args` object. Tests reload `comfy.cli_args`, which replaces the module
-# global; a bound `args` reference would go stale and point at the default
-# database URL instead of the one configured for the test.
+# Import the module so tests that reload comfy.cli_args see the live object.
 import comfy.cli_args
 
 _DB_AVAILABLE = False

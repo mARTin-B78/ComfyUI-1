@@ -50,6 +50,19 @@ def list_downloads() -> list[Download]:
         return rows
 
 
+def has_live_download_for_model(
+    model_id: str, live_statuses: tuple[str, ...], exclude_id: Optional[str] = None
+) -> bool:
+    with create_session() as session:
+        stmt = select(Download.id).where(
+            Download.model_id == model_id,
+            Download.status.in_(live_statuses),
+        ).limit(1)
+        if exclude_id is not None:
+            stmt = stmt.where(Download.id != exclude_id)
+        return session.execute(stmt).first() is not None
+
+
 def list_segments(download_id: str) -> list[DownloadSegment]:
     with create_session() as session:
         rows = list(
