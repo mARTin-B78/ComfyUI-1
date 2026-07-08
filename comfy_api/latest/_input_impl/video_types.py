@@ -707,13 +707,17 @@ class VideoFromFile(VideoInput):
 
                 elif packet.stream == audio_stream and not audio_done:
                     for resampled in itertools.chain.from_iterable(map(resampler.resample, packet.decode())):
+                        frame_start = None
+                        if resampled.pts is not None:
+                            # passthrough frames keep the source stream's time base
+                            tb = resampled.time_base if resampled.time_base else audio_time_base
+                            frame_start = float(resampled.pts * tb)
+                            if duration and not audio_started and frame_start >= start_time + duration:
+                                audio_done = True
+                                break
                         if not audio_started:
-                            if resampled.pts is None:
+                            if frame_start is None:
                                 frame_start = 0.0
-                            else:
-                                # passthrough frames keep the source stream's time base
-                                tb = resampled.time_base if resampled.time_base else audio_time_base
-                                frame_start = float(resampled.pts * tb)
                             to_skip = max(0, int((start_time - frame_start) * sample_rate))
                             if to_skip >= resampled.samples:
                                 continue
