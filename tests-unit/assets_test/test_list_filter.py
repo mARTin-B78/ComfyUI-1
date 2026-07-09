@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 import requests
-from helpers import assert_hash_fields_consistent
+from helpers import assert_hash_fields_consistent, get_asset_filename
 
 
 def test_list_assets_paging_and_sort(http: requests.Session, api_base: str, asset_factory, make_asset_bytes):
@@ -307,10 +307,10 @@ def test_list_assets_invalid_query_rejected(http: requests.Session, api_base: st
 
 
 def test_list_assets_display_name_emitted(http, api_base, asset_factory, make_asset_bytes):
-    """`display_name` is emitted for every populated asset and is derived from
-    the storage path (it ends with the stored filename)."""
+    """`display_name` is emitted for every populated asset in list responses,
+    derived from the storage path (category prefix + hash-based stored filename)."""
     scope = f"lf-dispname-{uuid.uuid4().hex[:6]}"
-    tags = ["models", "checkpoints", "unit-tests", scope]
+    tags = ["models", "model_type:checkpoints", "unit-tests", scope]
     asset_factory("dn_a.safetensors", tags, {}, make_asset_bytes("dn_a", 700))
     asset_factory("dn_b.safetensors", tags, {}, make_asset_bytes("dn_b", 700))
 
@@ -324,14 +324,14 @@ def test_list_assets_display_name_emitted(http, api_base, asset_factory, make_as
     assert body["assets"], "expected at least one asset"
     for asset in body["assets"]:
         assert "display_name" in asset, "populated asset must emit display_name"
-        assert asset["display_name"], "stored asset must have a path-derived display_name"
-        assert asset["display_name"].endswith(asset["name"])
+        expected = "checkpoints/" + get_asset_filename(asset["asset_hash"], ".safetensors")
+        assert asset["display_name"] == expected
 
 
 def test_list_assets_hash_filter_exact_match(http, api_base, asset_factory, make_asset_bytes):
     """`hash` filters to assets whose content hash matches exactly."""
     scope = f"lf-hash-{uuid.uuid4().hex[:6]}"
-    tags = ["models", "checkpoints", "unit-tests", scope]
+    tags = ["models", "model_type:checkpoints", "unit-tests", scope]
     a = asset_factory("hf_a.safetensors", tags, {}, make_asset_bytes("hf_a", 1024))
     b = asset_factory("hf_b.safetensors", tags, {}, make_asset_bytes("hf_b", 2048))
 
@@ -353,7 +353,7 @@ def test_list_assets_hash_filter_exact_match(http, api_base, asset_factory, make
 def test_list_assets_hash_filter_no_match(http, api_base, asset_factory, make_asset_bytes):
     """A well-formed but unknown hash returns an empty page (200)."""
     scope = f"lf-hash-none-{uuid.uuid4().hex[:6]}"
-    tags = ["models", "checkpoints", "unit-tests", scope]
+    tags = ["models", "model_type:checkpoints", "unit-tests", scope]
     asset_factory("hn_a.safetensors", tags, {}, make_asset_bytes("hn_a", 800))
 
     unknown = "blake3:" + ("0" * 64)
@@ -374,7 +374,7 @@ def test_list_assets_hash_filter_normalizes_case_and_whitespace(
     """`hash` is trimmed and lowercased before matching, so an upper-cased,
     space-padded value still matches the stored lowercase hash."""
     scope = f"lf-hashnorm-{uuid.uuid4().hex[:6]}"
-    tags = ["models", "checkpoints", "unit-tests", scope]
+    tags = ["models", "model_type:checkpoints", "unit-tests", scope]
     a = asset_factory("hnorm_a.safetensors", tags, {}, make_asset_bytes("hnorm_a", 1024))
 
     target = a["hash"]
@@ -399,7 +399,7 @@ def test_list_assets_hash_filter_empty_returns_empty_page(
     """An explicitly-supplied but empty `hash` (`?hash=`) is an exact-match miss
     and returns an empty page, rather than silently disabling the filter."""
     scope = f"lf-hashempty-{uuid.uuid4().hex[:6]}"
-    tags = ["models", "checkpoints", "unit-tests", scope]
+    tags = ["models", "model_type:checkpoints", "unit-tests", scope]
     asset_factory("he_a.safetensors", tags, {}, make_asset_bytes("he_a", 800))
 
     r = http.get(
@@ -417,7 +417,7 @@ def test_list_assets_include_public_accepted(http, api_base, asset_factory, make
     """`include_public` is accepted for contract parity; core results are always
     the caller's own assets regardless of its value (the param is inert)."""
     scope = f"lf-incpub-{uuid.uuid4().hex[:6]}"
-    tags = ["models", "checkpoints", "unit-tests", scope]
+    tags = ["models", "model_type:checkpoints", "unit-tests", scope]
     a = asset_factory("ip_a.safetensors", tags, {}, make_asset_bytes("ip_a", 900))
 
     for value in ("false", "true"):
